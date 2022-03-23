@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Modified by Tim Schimansky 2022 to directly call function from other python function.
+
 import argparse
 import os
 import sys
@@ -34,16 +36,22 @@ except:
         "necessary.\n\n")
     sys.exit(1)
 
+class Namespace:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
 
-def main():
-    parser = argparse.ArgumentParser()
+def fix_bagfile_header(par_inbag, par_outbag, par_callerid=None, par_mappings=[], par_use_local=True, par_verbose=False):
+    """parser = argparse.ArgumentParser()
     parser.add_argument('-v', '--verbose', action='store_true', help='Be verbose')
     parser.add_argument('-l', '--use-local-defs', dest='use_local', action='store_true', help='Use message defs from local system (as opposed to reading them from the provided mappings)')
     parser.add_argument('-c', '--callerid', type=str, help='Callerid (ie: publisher)')
     parser.add_argument('-m', '--map', dest='mappings', type=str, nargs=1, action='append', help='Mapping topic type -> good msg def (multiple allowed)', default=[])
     parser.add_argument('inbag', help='Input bagfile')
     parser.add_argument('outbag', help='Output bagfile')
-    args = parser.parse_args()
+    args = parser.parse_args()"""
+
+    # Write incoming parameters into args namespace
+    args = Namespace(callerid = par_callerid, inbag = par_inbag, mappings = par_mappings, outbag = par_outbag, use_local = par_use_local, verbose = par_verbose)
 
     if not os.path.isfile(args.inbag):
         sys.stderr.write('Cannot locate input bag file [%s]\n' % args.inbag)
@@ -178,5 +186,5 @@ def main():
     print ("\nThe new bag probably needs to be re-indexed. Use 'rosbag reindex {}' for that.\n".format(outbag.filename))
 
 
-if __name__ == '__main__':
-    main()
+"""if __name__ == '__main__':
+    main()"""

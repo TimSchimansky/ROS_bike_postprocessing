@@ -7,7 +7,9 @@ import seaborn as sea
 import matplotlib.pyplot as plt
 import numpy as np
 
+import fix_bag
 
+fix_bag.fix_bagfile_header("debug_test.bag", "debug_test_fixed_header.bag")
 b = bagreader('debug_test_fixed_header.bag')
 
 data = b.message_by_topic("/phone1/android/fix")
