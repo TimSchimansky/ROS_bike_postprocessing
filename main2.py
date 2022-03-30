@@ -16,9 +16,12 @@ class rosbag_reader:
         self.source_bag = rosbag.Bag(bag_file_name, 'r')
         self.topics = self.source_bag.get_type_and_topic_info()[1].keys()
 
+        # Keep track of exported topics
+        # TODO: add column for comments
+        self.exported_data = []
+
         # Prepare export folder if not existing
-        # TODO: make these generated from name or as parameter
-        self.bag_unpack_dir = 'debug_test_unpack'
+        self.bag_unpack_dir = os.path.splitext(os.path.basename(bag_file_name))[0]
         if not os.path.exists(self.bag_unpack_dir):
             os.makedirs(self.bag_unpack_dir)
 
@@ -29,6 +32,12 @@ class rosbag_reader:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """This function is used to close all connections to files when this class is not needed anymore"""
         self.source_bag.close()
+
+        # Write overview csv for bagfile
+        with open(os.path.join(self.bag_unpack_dir, 'overview.csv'), 'w') as f:
+            f.write('filename msg_type\n')
+            for line in self.exported_data:
+                f.write(line + '\n')
 
     def export_images(self):
         # TODO: make this parameters of the function
@@ -47,10 +56,15 @@ class rosbag_reader:
             image_file_name = ("%s.%s.png" %(msg.header.stamp.secs, msg.header.stamp.nsecs))
             cv2.imwrite(os.path.join(export_directory, image_file_name), temp_image)
 
-    def export_1d_data(self, topic):
+    def export_1d_data(self, topic_filter):
+        """Function to export data from topics that deliver 1 dimensional data"""
+        # TODO: allow for multiple topics of same msg type. Current: first gets overwritten
         # Load message type from msg for correct csv translation
-        topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic)
-        message_type = topic_meta.topics[topic].msg_type
+        topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic_filter)
+        message_type = topic_meta.topics[topic_filter].msg_type
+
+        # For debug only!
+        print('DEBUG: message type of topic: ' + topic_filter + ' is: ' + message_type)
 
         # Handle file export for barometric pressure data
         if message_type == 'sensor_msgs/FluidPressure':
@@ -64,8 +78,11 @@ class rosbag_reader:
                 f.write('timestamp fluid_pressure variance\n')
 
                 # Iterate over sensor messages
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic]):
+                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
                     f.write('%.12f %.12f %.12f\n' % (msg.header.stamp.to_sec(), msg.fluid_pressure, msg.variance))
+
+            # Add to list of exported data
+            self.exported_data.append('barometric_pressure.csv ' + message_type)
 
         # Handle file export for illuminance data
         elif message_type == 'sensor_msgs/Illuminance':
@@ -79,8 +96,11 @@ class rosbag_reader:
                 f.write('timestamp illuminance variance\n')
 
                 # Iterate over sensor messages
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic]):
+                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
                     f.write('%.12f %.12f %.12f\n' % (msg.header.stamp.to_sec(), msg.illuminance, msg.variance))
+
+            # Add to list of exported data
+            self.exported_data.append('illuminance.csv ' + message_type)
 
         # Handle file export for illuminance data
         elif message_type == 'sensor_msgs/Imu':
@@ -94,11 +114,14 @@ class rosbag_reader:
                 f.write('timestamp or_x or_y or_z or_w li_ac_x li_ac_y li_ac_z an_ve_x an_ve_y an_ve_z\n')
 
                 # Iterate over sensor messages
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic]):
+                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
 
                     # Assemble line output by conversion of message into list
                     content_list = [msg.header.stamp.to_sec()] + quaternion_to_list(msg.orientation) + vec3_to_list(msg.linear_acceleration) + vec3_to_list(msg.angular_velocity)
                     f.write('%.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f\n' %tuple(content_list))
+
+            # Add to list of exported data
+            self.exported_data.append('imu.csv ' + message_type)
 
         # Handle file export for illuminance data
         elif message_type == 'sensor_msgs/MagneticField':
@@ -112,21 +135,54 @@ class rosbag_reader:
                 f.write('timestamp x y z\n')
 
                 # Iterate over sensor messages
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic]):
+                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
                     # Assemble line output by conversion of message into list
                     f.write('%.12f %.12f %.12f %.12f\n' % tuple(
                         [msg.header.stamp.to_sec()] + vec3_to_list(msg.magnetic_field)))
 
+            # Add to list of exported data
+            self.exported_data.append('magnetic_field.csv ' + message_type)
+
+        elif message_type == 'sensor_msgs/NavSatFix':
+            # Assemble export filename
+            export_filename = os.path.join(self.bag_unpack_dir, 'nav_sat_fix.csv')
+
+            # TODO: Think about changing this into a binary format (maybe from Pandas)
+            # Open file with context handler
+            with open(export_filename, 'w') as f:
+                # Write header
+                f.write('timestamp alt lon lat ser fix\n')
+
+                # Iterate over sensor messages
+                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
+                    # Assemble line output by conversion of message into list
+                    f.write('%.12f %.12f %.12f %.12f %.12f %.12f\n' % (msg.header.stamp.to_sec(), msg.altitude, msg.longitude, msg.latitude, msg.status.service, msg.status.status))
+
+            # Add to list of exported data
+            self.exported_data.append('nav_sat_fix.csv ' + message_type)
+
         else:
             # TODO: throw exception
-            warnings.warn('The topic ' + topic + ' is not available in this bag file!')
+            warnings.warn('The topic ' + topic_filter + ' is not available in this bag file!')
             pass
 
-with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
-    reader_object.export_images()
+    def export_raw_lidar_data(self, topic):
+        # TODO: Jeldriks code
+        for topic, msg, t in self.source_bag.read_messages(topics=[topic]):
+            print(msg)
+
+class data_as_pandas:
+    def __init__(self, directory):
+        pass
+
+#with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
+with rosbag_reader("../debug_test_fixed_header.bag") as reader_object:
+    #reader_object.export_images()
     reader_object.export_1d_data('/phone1/android/barometric_pressure')
-    reader_object.export_1d_data('/phone1/android/illuminance')
-    reader_object.export_1d_data('/phone1/android/imu')
+    #reader_object.export_1d_data('/phone1/android/illuminance')
+    #reader_object.export_1d_data('/phone1/android/imu')
+    reader_object.export_1d_data('/phone1/android/fix')
     reader_object.export_1d_data('/phone1/android/magnetic_field')
+    #reader_object.export_raw_lidar_data('/hesai/pandar_packets')
     print(reader_object.topics)
 
