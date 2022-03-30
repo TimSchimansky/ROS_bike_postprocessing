@@ -3,12 +3,18 @@ import cv2
 import numpy as np
 import os
 import warnings
+import pandas as pd
+
+import matplotlib as plt
+import seaborn as sns
 
 def vec3_to_list(vector3_in):
     return [vector3_in.x, vector3_in.y, vector3_in.z]
 
+
 def quaternion_to_list(quaternion_in):
     return [quaternion_in.x, quaternion_in.y, quaternion_in.z, quaternion_in.w]
+
 
 class rosbag_reader:
     def __init__(self, bag_file_name):
@@ -53,7 +59,7 @@ class rosbag_reader:
             temp_image = cv2.imdecode(np.fromstring(msg.data, np.uint8), cv2.IMREAD_COLOR)
 
             # Write image into predefined folder
-            image_file_name = ("%s.%s.png" %(msg.header.stamp.secs, msg.header.stamp.nsecs))
+            image_file_name = ("%s.%s.png" % (msg.header.stamp.secs, msg.header.stamp.nsecs))
             cv2.imwrite(os.path.join(export_directory, image_file_name), temp_image)
 
     def export_1d_data(self, topic_filter):
@@ -115,10 +121,10 @@ class rosbag_reader:
 
                 # Iterate over sensor messages
                 for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-
                     # Assemble line output by conversion of message into list
-                    content_list = [msg.header.stamp.to_sec()] + quaternion_to_list(msg.orientation) + vec3_to_list(msg.linear_acceleration) + vec3_to_list(msg.angular_velocity)
-                    f.write('%.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f\n' %tuple(content_list))
+                    content_list = [msg.header.stamp.to_sec()] + quaternion_to_list(msg.orientation) + vec3_to_list(
+                        msg.linear_acceleration) + vec3_to_list(msg.angular_velocity)
+                    f.write('%.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f\n' % tuple(content_list))
 
             # Add to list of exported data
             self.exported_data.append('imu.csv ' + message_type)
@@ -143,6 +149,7 @@ class rosbag_reader:
             # Add to list of exported data
             self.exported_data.append('magnetic_field.csv ' + message_type)
 
+        # Handle file export for gnss data
         elif message_type == 'sensor_msgs/NavSatFix':
             # Assemble export filename
             export_filename = os.path.join(self.bag_unpack_dir, 'nav_sat_fix.csv')
@@ -156,7 +163,9 @@ class rosbag_reader:
                 # Iterate over sensor messages
                 for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
                     # Assemble line output by conversion of message into list
-                    f.write('%.12f %.12f %.12f %.12f %.12f %.12f\n' % (msg.header.stamp.to_sec(), msg.altitude, msg.longitude, msg.latitude, msg.status.service, msg.status.status))
+                    f.write('%.12f %.12f %.12f %.12f %.12f %.12f\n' % (
+                    msg.header.stamp.to_sec(), msg.altitude, msg.longitude, msg.latitude, msg.status.service,
+                    msg.status.status))
 
             # Add to list of exported data
             self.exported_data.append('nav_sat_fix.csv ' + message_type)
@@ -171,18 +180,53 @@ class rosbag_reader:
         for topic, msg, t in self.source_bag.read_messages(topics=[topic]):
             print(msg)
 
+class dataframe_with_meta:
+    def __init__(self, dataframe, message_type, orig_filename):
+        self.dataframe = dataframe
+        self.message_type = message_type
+        self.orig_filename = orig_filename
+
 class data_as_pandas:
     def __init__(self, directory):
-        pass
+        self.working_directory = directory
 
-#with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
+        # Load overview csv
+        self.data_file_list = pd.read_csv(os.path.join(self.working_directory, 'overview.csv'), sep=' ')
+        """for line in self.data_file_list.iterrows():
+            print(line[1][0])"""
+
+        # Create empty dict for pandas dataframes
+        self.dataframes = dict()
+
+    def load_from_working_directory(self, exclude=None):
+        # TODO: implement exclude option
+
+        # Iterate over available files
+        for data_file in self.data_file_list.iterrows():
+
+            # Load from csv into pandas
+            import_path = os.path.join(self.working_directory, data_file[1][0])
+            self.dataframes[data_file[1][1]] = dataframe_with_meta(pd.read_csv(import_path, sep=' '), data_file[1][1], data_file[1][0])
+
+# with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
 with rosbag_reader("../debug_test_fixed_header.bag") as reader_object:
-    #reader_object.export_images()
+    # reader_object.export_images()
     reader_object.export_1d_data('/phone1/android/barometric_pressure')
-    #reader_object.export_1d_data('/phone1/android/illuminance')
-    #reader_object.export_1d_data('/phone1/android/imu')
+    # reader_object.export_1d_data('/phone1/android/illuminance')
+    # reader_object.export_1d_data('/phone1/android/imu')
     reader_object.export_1d_data('/phone1/android/fix')
     reader_object.export_1d_data('/phone1/android/magnetic_field')
-    #reader_object.export_raw_lidar_data('/hesai/pandar_packets')
+    # reader_object.export_raw_lidar_data('/hesai/pandar_packets')
     print(reader_object.topics)
+
+bag_pandas = data_as_pandas('debug_test_fixed_header')
+bag_pandas.load_from_working_directory()
+
+# ---- Testing below --------------------------------------------
+
+# bag_pandas.dataframes['sensor_msgs/MagneticField'].dataframe['timestamp']
+# bag_pandas.dataframes['sensor_msgs/NavSatFix'].dataframe['longitude']
+
+# Apply the default theme
+sns.set_theme()
 
