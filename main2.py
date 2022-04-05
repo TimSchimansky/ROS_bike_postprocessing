@@ -2,11 +2,14 @@ import rosbag
 import cv2
 import numpy as np
 import os
+from datetime import datetime
 import warnings
 import pandas as pd
 
-import matplotlib as plt
+import matplotlib.pyplot as plt
 import seaborn as sns
+
+import fix_bag
 
 def vec3_to_list(vector3_in):
     return [vector3_in.x, vector3_in.y, vector3_in.z]
@@ -201,15 +204,26 @@ class data_as_pandas:
     def load_from_working_directory(self, exclude=None):
         # TODO: implement exclude option
 
+        # Create custom time parser
+        unix_time_parser = lambda x: datetime.fromtimestamp(float(x))
+
         # Iterate over available files
         for data_file in self.data_file_list.iterrows():
+            # Assemble file_name and tmp_topic
+            file_name = data_file[1][0]
+            tmp_topic = data_file[1][1]
 
             # Load from csv into pandas
-            import_path = os.path.join(self.working_directory, data_file[1][0])
-            self.dataframes[data_file[1][1]] = dataframe_with_meta(pd.read_csv(import_path, sep=' '), data_file[1][1], data_file[1][0])
+            import_path = os.path.join(self.working_directory, file_name)
+            self.dataframes[tmp_topic] = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
+
+
+
+
+fix_bag.fix_bagfile_header("../2022-03-24-11-40-06.bag", "../test3.bag")
 
 # with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
-with rosbag_reader("../debug_test_fixed_header.bag") as reader_object:
+with rosbag_reader("../test3.bag") as reader_object:
     # reader_object.export_images()
     reader_object.export_1d_data('/phone1/android/barometric_pressure')
     # reader_object.export_1d_data('/phone1/android/illuminance')
@@ -230,3 +244,20 @@ bag_pandas.load_from_working_directory()
 # Apply the default theme
 sns.set_theme()
 
+mag = bag_pandas.dataframes['sensor_msgs/MagneticField'].dataframe
+nav = bag_pandas.dataframes['sensor_msgs/NavSatFix'].dataframe
+pre = bag_pandas.dataframes['sensor_msgs/FluidPressure'].dataframe
+
+# Interpolate pressure data to magnetic data
+mixed_index = mag.index.join(pre.index, how='outer')
+pre_mag = pre.reindex(index=mixed_index).interpolate().reindex(mag.index)
+
+# tmp plotting
+sns.lineplot(data=mag.x, color="b")
+sns.lineplot(data=mag.y, color="g")
+sns.lineplot(data=mag.z, color="r")
+ax2 = plt.twinx()
+sns.lineplot(data=pre_mag.fluid_pressure, color="c", ax=ax2)
+plt.show()
+
+print(1)
