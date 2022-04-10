@@ -5,10 +5,12 @@ import os
 from datetime import datetime
 import warnings
 import pandas as pd
+import geopandas as gpd
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+#import map_plotting
 import fix_bag
 
 def vec3_to_list(vector3_in):
@@ -215,7 +217,17 @@ class data_as_pandas:
 
             # Load from csv into pandas
             import_path = os.path.join(self.working_directory, file_name)
-            self.dataframes[tmp_topic] = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
+
+            # In case of GNSS data create geopandas dataframe
+            if tmp_topic == 'sensor_msgs/NavSatFix':
+                # tmp_df = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
+                self.dataframes[tmp_topic] = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
+                self.dataframes[tmp_topic].dataframe = gpd.GeoDataFrame(self.dataframes[tmp_topic].dataframe.drop(['lon', 'lat'], axis=1), geometry=gpd.points_from_xy(self.dataframes[tmp_topic].dataframe.lon, self.dataframes[tmp_topic].dataframe.lat))
+
+                # Set coordinate system
+                self.dataframes[tmp_topic].dataframe.set_crs(epsg=4326, inplace=True)
+            else:
+                self.dataframes[tmp_topic] = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
 
 
 
