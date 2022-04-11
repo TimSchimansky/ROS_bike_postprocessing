@@ -230,13 +230,16 @@ class data_as_pandas:
             else:
                 self.dataframes[tmp_topic] = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
 
-
+def dec_2_dms(decimal):
+    minute, second = divmod(decimal*3600, 60)
+    degree, minute = divmod(minute, 60)
+    return '%d° %d\' %.2f\"' %(degree, minute, second)
 
 
 #fix_bag.fix_bagfile_header("../2022-03-24-11-40-06.bag", "../test3.bag")
 
 # with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
-with rosbag_reader("../kleefeld_trjectory_1.bag") as reader_object:
+"""with rosbag_reader("../kleefeld_trjectory_1.bag") as reader_object:
     #reader_object.export_images()
     reader_object.export_1d_data('/note9/android/barometric_pressure')
     # reader_object.export_1d_data('/phone1/android/illuminance')
@@ -244,7 +247,7 @@ with rosbag_reader("../kleefeld_trjectory_1.bag") as reader_object:
     reader_object.export_1d_data('/note9/android/fix')
     reader_object.export_1d_data('/note9/android/magnetic_field')
     # reader_object.export_raw_lidar_data('/hesai/pandar_packets')
-    print(reader_object.topics)
+    print(reader_object.topics)"""
 
 bag_pandas = data_as_pandas('kleefeld_trjectory_1')
 bag_pandas.load_from_working_directory()
@@ -270,7 +273,7 @@ left_bound, lower_bound, right_bound, upper_bound = nav.total_bounds
 
 # Calculate zoom level from predefined destination width
 # TODO: Make destination width a hyper parameter
-zoom = map_plotting.determine_zoom_level(left_bound, right_bound, 250)
+zoom = map_plotting.determine_zoom_level(left_bound, right_bound, 50)
 map_img, pixel_bound_tuple = map_plotting.generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom)
 
 # Create geopandas dataframe for bounding box and set coordinate system
@@ -291,8 +294,24 @@ ax.imshow(map_img, extent=(bounding_box.geometry.x[0], bounding_box.geometry.x[1
 
 # Set axes to be equal
 #ax.axis('equal')
-#ax.set_ylim(bounding_box.geometry.y[0], bounding_box.geometry.y[1])
-#ax.set_xlim(bounding_box.geometry.x[0], bounding_box.geometry.x[1])
+ax.set_ylim(bounding_box.geometry.y[0], bounding_box.geometry.y[1])
+ax.set_xlim(bounding_box.geometry.x[0], bounding_box.geometry.x[1])
+
+# Reformat ticks to epsg:4326
+ax.set_xticks(np.linspace(bounding_box.geometry.x[0], bounding_box.geometry.x[1], 5))
+xlabel_array = np.linspace(bounding_box.to_crs(epsg=4326).geometry.x[0], bounding_box.to_crs(epsg=4326).geometry.x[1], 5)
+xlabel_list = []
+for i, xlabel in enumerate(xlabel_array):
+    xlabel_list.append(dec_2_dms(xlabel))
+
+ax.set_xticklabels(xlabel_list)
+
+ax.set_yticks(np.linspace(bounding_box.geometry.y[0], bounding_box.geometry.y[1], 4))
+ylabel_array = np.linspace(bounding_box.to_crs(epsg=4326).geometry.y[0], bounding_box.to_crs(epsg=4326).geometry.y[1], 4)
+ylabel_list = []
+for i, ylabel in enumerate(ylabel_array):
+    ylabel_list.append(dec_2_dms(ylabel))
+ax.set_yticklabels(ylabel_list)
 
 # Show the plot
 plt.show()
@@ -300,7 +319,7 @@ plt.show()
 
 print(1)
 
-
+#plt.xticks(np.arange(bounding_box.geometry.x[0], bounding_box.geometry.x[1], step=0.2))
 """# Interpolate pressure data to magnetic data
 mixed_index = mag.index.join(pre.index, how='outer')
 pre_mag = pre.reindex(index=mixed_index).interpolate().reindex(mag.index)
