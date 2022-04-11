@@ -6,11 +6,12 @@ from datetime import datetime
 import warnings
 import pandas as pd
 import geopandas as gpd
+from shapely.geometry import Point
 
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-#import map_plotting
+import map_plotting
 import fix_bag
 
 def vec3_to_list(vector3_in):
@@ -260,7 +261,47 @@ mag = bag_pandas.dataframes['sensor_msgs/MagneticField'].dataframe
 nav = bag_pandas.dataframes['sensor_msgs/NavSatFix'].dataframe
 pre = bag_pandas.dataframes['sensor_msgs/FluidPressure'].dataframe
 
-# Interpolate pressure data to magnetic data
+
+
+# Calculate data boundaries
+"""left_bound, right_bound = 9.778970033148356, 9.792782600356505
+upper_bound, lower_bound = 52.377849536057006, 52.370752181339995"""
+left_bound, lower_bound, right_bound, upper_bound = nav.total_bounds
+
+# Calculate zoom level from predefined destination width
+# TODO: Make destination width a hyper parameter
+zoom = map_plotting.determine_zoom_level(left_bound, right_bound, 250)
+map_img, pixel_bound_tuple = map_plotting.generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom)
+
+# Create geopandas dataframe for bounding box and set coordinate system
+bounding_box = gpd.GeoDataFrame(geometry=gpd.points_from_xy((pixel_bound_tuple[0], pixel_bound_tuple[1]), (pixel_bound_tuple[2], pixel_bound_tuple[3])))
+bounding_box.set_crs(epsg=4326, inplace=True)
+bounding_box.to_crs(epsg=3857, inplace=True)
+
+# Plotting
+fig, ax = plt.subplots()
+
+# Scatter GNSS data on top
+xy = nav.to_crs(epsg=3857).geometry.map(lambda point: point.xy)
+x, y = zip(*xy)
+ax.scatter(x=x, y=y)
+
+# Insert image into boundsg
+ax.imshow(map_img, extent=(bounding_box.geometry.x[0], bounding_box.geometry.x[1], bounding_box.geometry.y[0], bounding_box.geometry.y[1]))
+
+# Set axes to be equal
+#ax.axis('equal')
+#ax.set_ylim(bounding_box.geometry.y[0], bounding_box.geometry.y[1])
+#ax.set_xlim(bounding_box.geometry.x[0], bounding_box.geometry.x[1])
+
+# Show the plot
+plt.show()
+
+
+print(1)
+
+
+"""# Interpolate pressure data to magnetic data
 mixed_index = mag.index.join(pre.index, how='outer')
 pre_mag = pre.reindex(index=mixed_index).interpolate().reindex(mag.index)
 
@@ -275,4 +316,4 @@ ax2 = plt.twinx()
 sns.lineplot(data=pre_mag.fluid_pressure, color="c", ax=ax2)
 plt.show()
 
-print(1)
+print(1)"""
