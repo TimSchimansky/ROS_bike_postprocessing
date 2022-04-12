@@ -223,7 +223,7 @@ class data_as_pandas:
             if tmp_topic == 'sensor_msgs/NavSatFix':
                 # tmp_df = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
                 self.dataframes[tmp_topic] = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
-                self.dataframes[tmp_topic].dataframe = gpd.GeoDataFrame(self.dataframes[tmp_topic].dataframe.drop(['lon', 'lat'], axis=1), geometry=gpd.points_from_xy(self.dataframes[tmp_topic].dataframe.lon, self.dataframes[tmp_topic].dataframe.lat))
+                self.dataframes[tmp_topic].dataframe = gpd.GeoDataFrame(self.dataframes[tmp_topic].dataframe, geometry=gpd.points_from_xy(self.dataframes[tmp_topic].dataframe.lon, self.dataframes[tmp_topic].dataframe.lat))
 
                 # Set coordinate system
                 self.dataframes[tmp_topic].dataframe.set_crs(epsg=4326, inplace=True)
@@ -264,7 +264,11 @@ mag = bag_pandas.dataframes['sensor_msgs/MagneticField'].dataframe
 nav = bag_pandas.dataframes['sensor_msgs/NavSatFix'].dataframe
 pre = bag_pandas.dataframes['sensor_msgs/FluidPressure'].dataframe
 
-
+# Interpolate data
+mixed_index = pre.index.join(nav.index, how='outer')
+nav_pre = pd.DataFrame(nav.iloc[:,:-1]).reindex(index=mixed_index).interpolate().reindex(pre.index)
+nav_pre = gpd.GeoDataFrame(nav_pre, geometry=gpd.points_from_xy(nav_pre.lon, nav_pre.lat))
+nav_pre.set_crs(epsg=4326, inplace=True)
 
 # Calculate data boundaries
 """left_bound, right_bound = 9.778970033148356, 9.792782600356505
@@ -273,21 +277,16 @@ left_bound, lower_bound, right_bound, upper_bound = nav.total_bounds
 
 # Calculate zoom level from predefined destination width
 # TODO: Make destination width a hyper parameter
-zoom = map_plotting.determine_zoom_level(left_bound, right_bound, 50)
-map_img, pixel_bound_tuple = map_plotting.generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom)
-
-# Create geopandas dataframe for bounding box and set coordinate system
-bounding_box = gpd.GeoDataFrame(geometry=gpd.points_from_xy((pixel_bound_tuple[0], pixel_bound_tuple[1]), (pixel_bound_tuple[2], pixel_bound_tuple[3])))
-bounding_box.set_crs(epsg=4326, inplace=True)
-bounding_box.to_crs(epsg=3857, inplace=True)
+zoom = map_plotting.determine_zoom_level(left_bound, right_bound, 1000)
+map_img, bounding_box = map_plotting.generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom)
 
 # Plotting
 fig, ax = plt.subplots()
 
 # Scatter GNSS data on top
-xy = nav.to_crs(epsg=3857).geometry.map(lambda point: point.xy)
+xy = nav_pre.to_crs(epsg=3857).geometry.map(lambda point: point.xy)
 x, y = zip(*xy)
-ax.scatter(x=x, y=y)
+ax.scatter(x=x, y=y, c=pre.fluid_pressure)
 
 # Insert image into boundsg
 ax.imshow(map_img, extent=(bounding_box.geometry.x[0], bounding_box.geometry.x[1], bounding_box.geometry.y[0], bounding_box.geometry.y[1]))
@@ -303,7 +302,6 @@ xlabel_array = np.linspace(bounding_box.to_crs(epsg=4326).geometry.x[0], boundin
 xlabel_list = []
 for i, xlabel in enumerate(xlabel_array):
     xlabel_list.append(dec_2_dms(xlabel))
-
 ax.set_xticklabels(xlabel_list)
 
 ax.set_yticks(np.linspace(bounding_box.geometry.y[0], bounding_box.geometry.y[1], 4))
@@ -319,13 +317,12 @@ plt.show()
 
 print(1)
 
-#plt.xticks(np.arange(bounding_box.geometry.x[0], bounding_box.geometry.x[1], step=0.2))
 """# Interpolate pressure data to magnetic data
 mixed_index = mag.index.join(pre.index, how='outer')
 pre_mag = pre.reindex(index=mixed_index).interpolate().reindex(mag.index)
 
-mixed_index = pre.index.join(nav.index, how='outer')
-nav_pre = nav.reindex(index=mixed_index).interpolate().reindex(pre.index)
+
+
 
 # tmp plotting
 sns.lineplot(data=mag.x, color="b")

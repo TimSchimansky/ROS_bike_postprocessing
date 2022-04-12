@@ -1,24 +1,22 @@
 import math
 from itertools import product
 
-import matplotlib.pyplot as plt
 from skimage import io as skio
 import numpy as np
+import geopandas as gpd
 
 
 def point_to_pixels(lon, lat, zoom, tile_size):
-    """convert gps coordinates to web mercator - this function is provided by Open Street maps"""
+    """convert gps coordinates to web mercator - this function is provided by the open Street maps wiki"""
     r = math.pow(2, zoom) * tile_size
     lat = math.radians(lat)
-
     x = int((lon + 180.0) / 360.0 * r)
     y = int((1.0 - math.log(math.tan(lat) + (1.0 / math.cos(lat))) / math.pi) / 2.0 * r)
-
     return x, y
 
 def pixels_to_points(x, y, zoom, tile_size):
+    """convert web mercator to gps coordinates - this function is provided by the open Street maps wiki"""
     r = math.pow(2, zoom) * tile_size
-
     lon_deg = x / r * 360.0 - 180.0
     lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * y / r)))
     lat_deg = math.degrees(lat_rad)
@@ -67,8 +65,13 @@ def generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom, 
     lat_max, lon_min = pixels_to_points(x0, y0, zoom, tile_size)
     lat_min, lon_max = pixels_to_points(x1, y1, zoom, tile_size)
 
+    # Create geopandas dataframe for bounding box and set coordinate system
+    bounding_box = gpd.GeoDataFrame(geometry=gpd.points_from_xy((lon_min, lon_max), (lat_min, lat_max)))
+    bounding_box.set_crs(epsg=4326, inplace=True)
+    bounding_box.to_crs(epsg=3857, inplace=True)
+
     # Return cutout and boundary tuple
-    return whole_img[y0 - y:y1 - y, x0 - x:x1 - x, :], (lon_min, lon_max, lat_min, lat_max)
+    return whole_img[y0 - y:y1 - y, x0 - x:x1 - x, :], bounding_box
 
 def determine_zoom_level(left_bound, right_bound, destination_width_px, tile_size=256):
     # Generate list of zoom levels (width in degrees per tile) as lookup table
@@ -82,28 +85,3 @@ def determine_zoom_level(left_bound, right_bound, destination_width_px, tile_siz
 
     # Get zoom level from lookup table
     return (np.abs(zoom_lvls - tile_width_deg)).argmin()
-
-"""# Main
-# Define map bounds
-left_bound, right_bound = 9.778970033148356, 9.792782600356505
-upper_bound, lower_bound = 52.377849536057006, 52.370752181339995
-
-# Get zoom level from predefined destination width
-zoom = determine_zoom_level(left_bound, right_bound, 1000)
-
-map_img, pixel_bound_tuple = generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom)
-
-plt.imshow(map_img)
-plt.show()
-
-
-# Other test
-
-
-upper_bound, lower_bound = 52.377849536057006, 9.778970033148356
-
-x0, y0 = point_to_pixels(upper_bound, lower_bound, 10, 256)
-
-
-print(pixels_to_points(x0, y0, 10, 256))"""
-
