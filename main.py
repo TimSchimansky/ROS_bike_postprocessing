@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 import map_plotting
+from hesai_pandar_64_packets import *
 import fix_bag
 
 def vec3_to_list(vector3_in):
@@ -67,6 +68,16 @@ class rosbag_reader:
             # Write image into predefined folder
             image_file_name = ("%s.%s.png" % (msg.header.stamp.secs, msg.header.stamp.nsecs))
             cv2.imwrite(os.path.join(export_directory, image_file_name), temp_image)
+
+    def export_pointclouds(self):
+
+        for topic, msg, t in self.source_bag.read_messages(topics=['/hesai/pandar_packets']):
+            for packet in msg.packets:
+
+                test = HesaiPandar64Packets.from_bytes(packet.data)
+                print(packet)
+
+        print(1)
 
     def export_1d_data(self, topic_filter):
         """Function to export data from topics that deliver 1 dimensional data"""
@@ -155,27 +166,6 @@ class rosbag_reader:
             # Add to list of exported data
             self.exported_data.append('magnetic_field.csv ' + message_type)
 
-        # Handle file export for gnss data
-        elif message_type == 'sensor_msgs/NavSatFix':
-            # Assemble export filename
-            export_filename = os.path.join(self.bag_unpack_dir, 'nav_sat_fix.csv')
-
-            # TODO: Think about changing this into a binary format (maybe from Pandas)
-            # Open file with context handler
-            with open(export_filename, 'w') as f:
-                # Write header
-                f.write('timestamp alt lon lat ser fix\n')
-
-                # Iterate over sensor messages
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-                    # Assemble line output by conversion of message into list
-                    f.write('%.12f %.12f %.12f %.12f %.12f %.12f\n' % (
-                    t.to_sec(), msg.altitude, msg.longitude, msg.latitude, msg.status.service,
-                    msg.status.status))
-
-            # Add to list of exported data
-            self.exported_data.append('nav_sat_fix.csv ' + message_type)
-
         else:
             # TODO: throw exception
             warnings.warn('The topic ' + topic_filter + ' is not available in this bag file!')
@@ -239,15 +229,17 @@ def dec_2_dms(decimal):
 #fix_bag.fix_bagfile_header("../2022-03-24-11-40-06.bag", "../test3.bag")
 
 # with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
-"""with rosbag_reader("../kleefeld_trjectory_1.bag") as reader_object:
+with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
+    print(reader_object.topics)
     #reader_object.export_images()
-    reader_object.export_1d_data('/note9/android/barometric_pressure')
+    #reader_object.export_1d_data('/note9/android/barometric_pressure')
     # reader_object.export_1d_data('/phone1/android/illuminance')
     # reader_object.export_1d_data('/phone1/android/imu')
-    reader_object.export_1d_data('/note9/android/fix')
-    reader_object.export_1d_data('/note9/android/magnetic_field')
+    # reader_object.export_1d_data('/phone1/android/fix')
+    reader_object.export_1d_data('/phone1/android/magnetic_field')
+    reader_object.export_pointclouds()
     # reader_object.export_raw_lidar_data('/hesai/pandar_packets')
-    print(reader_object.topics)"""
+    print(reader_object.topics)
 
 bag_pandas = data_as_pandas('kleefeld_trjectory_1')
 bag_pandas.load_from_working_directory()
