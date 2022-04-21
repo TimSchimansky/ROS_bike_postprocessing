@@ -6,6 +6,7 @@ from datetime import datetime
 import warnings
 import pandas as pd
 import geopandas as gpd
+import open3d as o3d
 from shapely.geometry import Point
 
 import matplotlib.pyplot as plt
@@ -21,6 +22,13 @@ def vec3_to_list(vector3_in):
 
 def quaternion_to_list(quaternion_in):
     return [quaternion_in.x, quaternion_in.y, quaternion_in.z, quaternion_in.w]
+
+def polar_to_cartesian(azimuth, elevation, distance):
+    elevation = (np.pi / 2) - elevation
+    x = distance * np.sin(elevation) * np.cos(azimuth)
+    y = distance * np.sin(elevation) * np.sin(azimuth)
+    z = distance * np.cos(elevation)
+    return x, y, z
 
 
 class rosbag_reader:
@@ -70,14 +78,64 @@ class rosbag_reader:
             cv2.imwrite(os.path.join(export_directory, image_file_name), temp_image)
 
     def export_pointclouds(self):
+        pcd = o3d.geometry.PointCloud()
+
+        point_array = np.empty((0,3))
 
         for topic, msg, t in self.source_bag.read_messages(topics=['/hesai/pandar_packets']):
-            for packet in msg.packets:
 
-                test = HesaiPandar64Packets.from_bytes(packet.data)
-                print(packet)
+            start_time = datetime.now()
 
+            for i, packet in enumerate(msg.packets[:-1]):
+                # Get cartesian points from UDP packet and append to numpy array
+                point_array = np.append(point_array, np.array(self.raw_hesai_to_cartesian(packet.data)).squeeze(), axis=0)
+
+                # Skip last UDP packet
+                if i == 600:
+                    continue
+
+            end_time = datetime.now()
+            print('Duration: {}'.format(end_time - start_time))
+
+        pcd.points = o3d.utility.Vector3dVector(np.vstack((np.asarray(pcd.points), point_array)))
         print(1)
+
+    def raw_hesai_to_cartesian(self, packet_data):
+        # Create data transfer object from binary UDP package
+        hesai_udp_dto = HesaiPandar64Packets.from_bytes(packet_data)
+
+        point_list = []
+
+        # Check for dual return mode
+        if hesai_udp_dto.tail.return_mode == 57:
+            block_iter_start = 1
+            block_iter_step = 2
+        else:
+            block_iter_start = 0
+            block_iter_step = 1
+
+        # Iterate over all blocks
+        for block in hesai_udp_dto.blocks[block_iter_start::block_iter_step]:
+            # Retrieve azimuth value for current block
+            azimuth_rad = np.deg2rad(block.azimuth_deg)
+
+            # Iterate over Channels
+            for i, channel in enumerate(block.channel):
+                # directly skip if distance is zero
+                if channel.distance_value == 0:
+                    continue
+
+                # Get elevation
+                elevation_rad = np.deg2rad(hesai_udp_dto.pandar_64_elevation_lut[i])
+
+                # Correct azimuth
+                azimuth_rad_corr = azimuth_rad + np.deg2rad(hesai_udp_dto.pandar_64_azimuth_corr_lut[i])
+
+                point_list.append([polar_to_cartesian(azimuth_rad_corr, elevation_rad, channel.distance_value/1000)])
+                #print(polar_to_cartesian(azimuth_rad_corr, elevation_rad, channel.distance_value/1000))
+                #print(elevation_rad, , channel.distance_value, channel.reflectance_value)
+
+        return point_list
 
     def export_1d_data(self, topic_filter):
         """Function to export data from topics that deliver 1 dimensional data"""
