@@ -143,22 +143,3 @@ class HesaiPandar64Packets(KaitaiStruct):
             self._raw_dummy2 = self._io.read_bytes(2)
             _io__raw_dummy2 = KaitaiStream(BytesIO(self._raw_dummy2))
             self.dummy2 = HesaiPandar64Packets.Dummy(_io__raw_dummy2, self, self._root)
-
-
-    @property
-    def pandar_64_elevation_lut(self):
-        if hasattr(self, '_m_pandar_64_elevation_lut'):
-            return self._m_pandar_64_elevation_lut if hasattr(self, '_m_pandar_64_elevation_lut') else None
-
-        self._m_pandar_64_elevation_lut = [14.803, 10.953, 7.98, 4.978, 2.961, 1.949, 1.781, 1.609, 1.443, 1.272, 1.105, 0.934, 0.767, 0.596, 0.429, 0.258, 0.09, -0.079, -0.248, -0.416, -0.587, -0.754, -0.924, -1.092, -1.263, -1.43, -1.601, -1.767, -1.939, -2.107, -2.277, -2.444, -2.615, -2.779, -2.952, -3.119, -3.289, -3.454, -3.627, -3.791, -3.963, -4.129, -4.3, -4.464, -4.637, -4.799, -4.971, -5.136, -5.308, -5.47, -5.644, -5.805, -5.977, -6.14, -7.142, -8.138, -9.139, -10.124, -11.111, -12.085, -13.053, -14.009, -18.968, -24.976]
-        return self._m_pandar_64_elevation_lut if hasattr(self, '_m_pandar_64_elevation_lut') else None
-
-    @property
-    def pandar_64_azimuth_corr_lut(self):
-        if hasattr(self, '_m_pandar_64_azimuth_corr_lut'):
-            return self._m_pandar_64_azimuth_corr_lut if hasattr(self, '_m_pandar_64_azimuth_corr_lut') else None
-
-        self._m_pandar_64_azimuth_corr_lut = [-1.042, -1.042, -1.042, -1.042, -1.042, -1.042, 1.042, 3.125, 5.208, -5.208, -3.125, -1.042, 1.042, 3.125, 5.208, -5.208, -3.125, -1.042, 1.042, 3.125, 5.208, -5.208, -3.125, -1.042, 1.042, 3.125, 5.208, -5.208, -3.125, -1.042, 1.042, 3.125, 5.208, -5.208, -3.125, -1.042, 1.042, 3.125, 5.208, -5.208, -3.125, -1.042, 1.042, 3.125, 5.208, -5.208, -3.125, -1.042, 1.042, 3.125, 5.208, -5.208, -3.125, -1.042, -1.042, -1.042, -1.042, -1.042, -1.042, -1.042, -1.042, -1.042, -1.042, -1.042]
-        return self._m_pandar_64_azimuth_corr_lut if hasattr(self, '_m_pandar_64_azimuth_corr_lut') else None
-
-
