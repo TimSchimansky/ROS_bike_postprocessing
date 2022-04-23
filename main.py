@@ -7,6 +7,8 @@ import warnings
 import pandas as pd
 import geopandas as gpd
 import open3d as o3d
+from io import StringIO
+import csv
 from shapely.geometry import Point
 
 import matplotlib.pyplot as plt
@@ -60,16 +62,16 @@ class rosbag_reader:
             for line in self.exported_data:
                 f.write(line + '\n')
 
-    def export_images(self):
+    def export_images(self, topic, sensor_name='camera_0'):
         # TODO: make this parameters of the function
-        camera_unpack_subdir = 'camera'
+        camera_unpack_subdir = sensor_name
 
         # Prepare export folder if not existing
         export_directory = os.path.join(self.bag_unpack_dir, camera_unpack_subdir)
         if not os.path.exists(export_directory):
             os.makedirs(export_directory)
 
-        for topic, msg, t in self.source_bag.read_messages(topics=['/note9/camera/image/compressed']):
+        for topic, msg, t in self.source_bag.read_messages(topics=[topic]):
             # Convert msg to numpy then to opencv image
             temp_image = cv2.imdecode(np.fromstring(msg.data, np.uint8), cv2.IMREAD_COLOR)
 
@@ -77,34 +79,52 @@ class rosbag_reader:
             image_file_name = ("%s.%s.png" % (msg.header.stamp.secs, msg.header.stamp.nsecs))
             cv2.imwrite(os.path.join(export_directory, image_file_name), temp_image)
 
-    def export_pointclouds(self):
+    def export_pointclouds(self, topic, sensor_name='lidar_0'):
         pcd = o3d.geometry.PointCloud()
 
-        point_array = np.empty((0,3))
+        # TODO: make this parameters of the function
+        lidar_unpack_subdir = sensor_name
 
-        for topic, msg, t in self.source_bag.read_messages(topics=['/hesai/pandar_packets']):
+        # Prepare export folder if not existing
+        export_directory = os.path.join(self.bag_unpack_dir, lidar_unpack_subdir)
+        if not os.path.exists(export_directory):
+            os.makedirs(export_directory)
 
-            start_time = datetime.now()
+        for msg_number, (topic, msg, t) in enumerate(self.source_bag.read_messages(topics=[topic])):
+            # Create empty array for point coordinates and reflectances
+            point_array = np.empty((0, 3))
+            reflectance_array = np.empty((0, 1))
+
+            # Retrieve sensor calibration from last udp package
+            calibration_array_raw = msg.packets[-1].data[8:].decode('utf-8')
+            self.calibration_array = np.genfromtxt(StringIO(calibration_array_raw), delimiter=",", skip_header=1)
 
             for i, packet in enumerate(msg.packets[:-1]):
                 # Get cartesian points from UDP packet and append to numpy array
-                point_array = np.append(point_array, np.array(self.raw_hesai_to_cartesian(packet.data)).squeeze(), axis=0)
+                tmp_point_array, tmp_reflectance_array = self.raw_hesai_to_cartesian(packet.data)
 
-                # Skip last UDP packet
-                if i == 600:
-                    continue
+                # Append new data to existing array
+                point_array = np.append(point_array, tmp_point_array, axis=0)
+                reflectance_array = np.append(reflectance_array, tmp_reflectance_array, axis=0)
 
-            end_time = datetime.now()
-            print('Duration: {}'.format(end_time - start_time))
+                """print(packet.stamp)
+                print(msg.packets[0].stamp.secs, packet.stamp.secs)"""
 
-        pcd.points = o3d.utility.Vector3dVector(np.vstack((np.asarray(pcd.points), point_array)))
-        print(1)
+            # Put values into pointcloud object
+            pcd.points = o3d.utility.Vector3dVector(point_array)
+            pcd.colors = o3d.utility.Vector3dVector(np.repeat(reflectance_array, 3, axis=1) / 255)
+
+            # Export data
+            point_cloud_file_name = ("%s.%s.ply" % (msg.packets[0].stamp.secs, msg.packets[0].stamp.nsecs))
+            o3d.io.write_point_cloud(os.path.join(export_directory, point_cloud_file_name), pcd)
 
     def raw_hesai_to_cartesian(self, packet_data):
         # Create data transfer object from binary UDP package
         hesai_udp_dto = HesaiPandar64Packets.from_bytes(packet_data)
 
-        point_list = []
+        # Pull sensor info from self.calibration array
+        elevation_array = (np.pi / 2) - np.deg2rad(self.calibration_array[:, 1])
+        azimuth_offset_array = np.deg2rad(self.calibration_array[:, 2])
 
         # Check for dual return mode
         if hesai_udp_dto.tail.return_mode == 57:
@@ -118,39 +138,40 @@ class rosbag_reader:
         for block in hesai_udp_dto.blocks[block_iter_start::block_iter_step]:
             # Retrieve azimuth value for current block
             azimuth_rad = np.deg2rad(block.azimuth_deg)
+            azimuth_array = azimuth_offset_array + azimuth_rad
 
-            # Iterate over Channels
-            for i, channel in enumerate(block.channel):
-                # directly skip if distance is zero
-                if channel.distance_value == 0:
-                    continue
+            # Get list of all distances and reflectances
+            distance_array = np.asarray([channel.distance_value for channel in block.channel])/1000
+            reflectance_array = np.asarray([channel.reflectance_value for channel in block.channel])
 
-                # Get elevation
-                elevation_rad = np.deg2rad(hesai_udp_dto.pandar_64_elevation_lut[i])
+            # Create mask for zero distance entries
+            valid_value_mask = distance_array != 0
 
-                # Correct azimuth
-                azimuth_rad_corr = azimuth_rad + np.deg2rad(hesai_udp_dto.pandar_64_azimuth_corr_lut[i])
+            # Conversion from polar to cartesian
+            x_array = distance_array[valid_value_mask] * np.sin(elevation_array[valid_value_mask]) * np.cos(azimuth_array[valid_value_mask])
+            y_array = distance_array[valid_value_mask] * np.sin(elevation_array[valid_value_mask]) * np.sin(azimuth_array[valid_value_mask])
+            z_array = distance_array[valid_value_mask] * np.cos(elevation_array[valid_value_mask])
 
-                point_list.append([polar_to_cartesian(azimuth_rad_corr, elevation_rad, channel.distance_value/1000)])
-                #print(polar_to_cartesian(azimuth_rad_corr, elevation_rad, channel.distance_value/1000))
-                #print(elevation_rad, , channel.distance_value, channel.reflectance_value)
+            return np.vstack((x_array,y_array,z_array)).T, np.expand_dims(reflectance_array[valid_value_mask], axis=1)
 
-        return point_list
-
-    def export_1d_data(self, topic_filter):
+    def export_1d_data(self, topic_filter, sensor_name=None):
         """Function to export data from topics that deliver 1 dimensional data"""
         # TODO: allow for multiple topics of same msg type. Current: first gets overwritten
         # Load message type from msg for correct csv translation
         topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic_filter)
         message_type = topic_meta.topics[topic_filter].msg_type
 
-        # For debug only!
+        # Debug output
         print('DEBUG: message type of topic: ' + topic_filter + ' is: ' + message_type)
 
         # Handle file export for barometric pressure data
         if message_type == 'sensor_msgs/FluidPressure':
             # Assemble export filename
-            export_filename = os.path.join(self.bag_unpack_dir, 'barometric_pressure.csv')
+            if sensor_name == None:
+                export_filename = 'pressure_sensor_0.csv'
+            else:
+                export_filename = sensor_name + '.csv'
+            export_filename = os.path.join(self.bag_unpack_dir, export_filename)
 
             # TODO: Think about changing this into a binary format (maybe from Pandas)
             # Open file with context handler
@@ -162,13 +183,14 @@ class rosbag_reader:
                 for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
                     f.write('%.12f %.12f %.12f\n' % (t.to_sec(), msg.fluid_pressure, msg.variance))
 
-            # Add to list of exported data
-            self.exported_data.append('barometric_pressure.csv ' + message_type)
-
         # Handle file export for illuminance data
         elif message_type == 'sensor_msgs/Illuminance':
             # Assemble export filename
-            export_filename = os.path.join(self.bag_unpack_dir, 'illuminance.csv')
+            if sensor_name == None:
+                export_filename = 'illuminance_sensor_0.csv'
+            else:
+                export_filename = sensor_name + '.csv'
+            export_filename = os.path.join(self.bag_unpack_dir, export_filename)
 
             # TODO: Think about changing this into a binary format (maybe from Pandas)
             # Open file with context handler
@@ -180,13 +202,14 @@ class rosbag_reader:
                 for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
                     f.write('%.12f %.12f %.12f\n' % (t.to_sec(), msg.illuminance, msg.variance))
 
-            # Add to list of exported data
-            self.exported_data.append('illuminance.csv ' + message_type)
-
-        # Handle file export for illuminance data
+        # Handle file export for IMU data
         elif message_type == 'sensor_msgs/Imu':
             # Assemble export filename
-            export_filename = os.path.join(self.bag_unpack_dir, 'imu.csv')
+            if sensor_name == None:
+                export_filename = 'inertial_measurement_unit_0.csv'
+            else:
+                export_filename = sensor_name + '.csv'
+            export_filename = os.path.join(self.bag_unpack_dir, export_filename)
 
             # TODO: Think about changing this into a binary format (maybe from Pandas)
             # Open file with context handler
@@ -201,13 +224,14 @@ class rosbag_reader:
                         msg.linear_acceleration) + vec3_to_list(msg.angular_velocity)
                     f.write('%.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f\n' % tuple(content_list))
 
-            # Add to list of exported data
-            self.exported_data.append('imu.csv ' + message_type)
-
-        # Handle file export for illuminance data
+        # Handle file export for magnetic field data
         elif message_type == 'sensor_msgs/MagneticField':
             # Assemble export filename
-            export_filename = os.path.join(self.bag_unpack_dir, 'magnetic_field.csv')
+            if sensor_name == None:
+                export_filename = 'magnetic_field_sensor_0.csv'
+            else:
+                export_filename = sensor_name + '.csv'
+            export_filename = os.path.join(self.bag_unpack_dir, export_filename)
 
             # TODO: Think about changing this into a binary format (maybe from Pandas)
             # Open file with context handler
@@ -221,18 +245,13 @@ class rosbag_reader:
                     f.write('%.12f %.12f %.12f %.12f\n' % tuple(
                         [t.to_sec()] + vec3_to_list(msg.magnetic_field)))
 
-            # Add to list of exported data
-            self.exported_data.append('magnetic_field.csv ' + message_type)
-
         else:
             # TODO: throw exception
             warnings.warn('The topic ' + topic_filter + ' is not available in this bag file!')
             pass
 
-    def export_raw_lidar_data(self, topic):
-        # TODO: Jeldriks code
-        for topic, msg, t in self.source_bag.read_messages(topics=[topic]):
-            print(msg)
+        # Add to list of exported data
+        self.exported_data.append(export_filename + ' ' + message_type + ' ' + topic_filter)
 
 class dataframe_with_meta:
     def __init__(self, dataframe, message_type, orig_filename):
@@ -289,16 +308,25 @@ def dec_2_dms(decimal):
 # with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
 with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
     print(reader_object.topics)
-    #reader_object.export_images()
+
+    #reader_object.export_pointclouds('/hesai/pandar_packets', sensor_name='lidar_0')
+    reader_object.export_images('/phone1/camera/image/compressed', sensor_name='camera_0')
+
+    reader_object.export_1d_data('/phone1/android/magnetic_field', sensor_name='magnetic_field_sensor_0')
+    reader_object.export_1d_data('/phone1/android/illuminance', sensor_name='illuminance_sensor_0')
+    reader_object.export_1d_data('/phone1/android/imu', sensor_name='inertial_measurement_unit_0')
+    reader_object.export_1d_data('/phone1/android/barometric_pressure', sensor_name='pressure_sensor_0')
+
     #reader_object.export_1d_data('/note9/android/barometric_pressure')
     # reader_object.export_1d_data('/phone1/android/illuminance')
     # reader_object.export_1d_data('/phone1/android/imu')
     # reader_object.export_1d_data('/phone1/android/fix')
-    reader_object.export_1d_data('/phone1/android/magnetic_field')
-    reader_object.export_pointclouds()
+    #reader_object.export_1d_data('/phone1/android/magnetic_field')
+    #reader_object.export_pointclouds()
     # reader_object.export_raw_lidar_data('/hesai/pandar_packets')
     print(reader_object.topics)
 
+"""
 bag_pandas = data_as_pandas('kleefeld_trjectory_1')
 bag_pandas.load_from_working_directory()
 
@@ -321,8 +349,8 @@ nav_pre = gpd.GeoDataFrame(nav_pre, geometry=gpd.points_from_xy(nav_pre.lon, nav
 nav_pre.set_crs(epsg=4326, inplace=True)
 
 # Calculate data boundaries
-"""left_bound, right_bound = 9.778970033148356, 9.792782600356505
-upper_bound, lower_bound = 52.377849536057006, 52.370752181339995"""
+#left_bound, right_bound = 9.778970033148356, 9.792782600356505
+#upper_bound, lower_bound = 52.377849536057006, 52.370752181339995
 left_bound, lower_bound, right_bound, upper_bound = nav.total_bounds
 
 # Calculate zoom level from predefined destination width
@@ -367,7 +395,7 @@ plt.show()
 
 print(1)
 
-"""# Interpolate pressure data to magnetic data
+# Interpolate pressure data to magnetic data
 mixed_index = mag.index.join(pre.index, how='outer')
 pre_mag = pre.reindex(index=mixed_index).interpolate().reindex(mag.index)
 
