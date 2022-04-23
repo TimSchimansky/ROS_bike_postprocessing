@@ -6,7 +6,7 @@ from datetime import datetime
 import warnings
 import pandas as pd
 import geopandas as gpd
-import open3d as o3d
+#import open3d as o3d
 from io import StringIO
 import csv
 from shapely.geometry import Point
@@ -25,13 +25,35 @@ def vec3_to_list(vector3_in):
 def quaternion_to_list(quaternion_in):
     return [quaternion_in.x, quaternion_in.y, quaternion_in.z, quaternion_in.w]
 
-def polar_to_cartesian(azimuth, elevation, distance):
-    elevation = (np.pi / 2) - elevation
-    x = distance * np.sin(elevation) * np.cos(azimuth)
-    y = distance * np.sin(elevation) * np.sin(azimuth)
-    z = distance * np.cos(elevation)
-    return x, y, z
+class PLYWriter:
+    """Reused from IKG-Intersection project 2021"""
 
+    def __init__(self, file, fields, comments=None):
+        assert(file.mode == "wb")
+        self._file = file
+        self._counter = 0
+        header = 'ply\nformat binary_little_endian 1.0\nelement vertex 000000000000'
+        if comments is not None:
+            if isinstance(comments, str):
+                comments = comments.split("\n")
+            for comment in comments:
+                header += "\ncomment {}".format(comment)
+        for name, dtype in fields:
+            header += "\nproperty {} {}".format(dtype.__name__, name)
+        header += "\nend_header\n"
+        self._file.write(bytes(header, encoding='utf-8'))
+
+    def writeArray(self, data):
+        self._file.write(data.tobytes())
+        self._counter += data.shape[0]
+
+    def writeDataFrame(self, data):
+        self._file.write(data.to_records(index=False).tobytes())
+        self._counter += len(data)
+
+    def finish(self):
+        self._file.seek(51)
+        self._file.write(bytes("{:012d}".format(self._counter), encoding="utf-8"))
 
 class rosbag_reader:
     def __init__(self, bag_file_name):
@@ -73,50 +95,57 @@ class rosbag_reader:
 
         for topic, msg, t in self.source_bag.read_messages(topics=[topic]):
             # Convert msg to numpy then to opencv image
-            temp_image = cv2.imdecode(np.fromstring(msg.data, np.uint8), cv2.IMREAD_COLOR)
+            temp_image = cv2.imdecode(np.frombuffer(msg.data, np.uint8), cv2.IMREAD_COLOR)
 
             # Write image into predefined folder
             image_file_name = ("%s.%s.png" % (msg.header.stamp.secs, msg.header.stamp.nsecs))
             cv2.imwrite(os.path.join(export_directory, image_file_name), temp_image)
 
     def export_pointclouds(self, topic, sensor_name='lidar_0'):
-        pcd = o3d.geometry.PointCloud()
-
-        # TODO: make this parameters of the function
-        lidar_unpack_subdir = sensor_name
-
         # Prepare export folder if not existing
+        lidar_unpack_subdir = sensor_name
         export_directory = os.path.join(self.bag_unpack_dir, lidar_unpack_subdir)
         if not os.path.exists(export_directory):
             os.makedirs(export_directory)
 
         for msg_number, (topic, msg, t) in enumerate(self.source_bag.read_messages(topics=[topic])):
+            # Debug timing
+            start_time = datetime.now()
+
             # Create empty array for point coordinates and reflectances
-            point_array = np.empty((0, 3))
-            reflectance_array = np.empty((0, 1))
+            point_cloud_array = np.empty((0, 5))
 
             # Retrieve sensor calibration from last udp package
             calibration_array_raw = msg.packets[-1].data[8:].decode('utf-8')
             self.calibration_array = np.genfromtxt(StringIO(calibration_array_raw), delimiter=",", skip_header=1)
+
+            # Retrieve starting second of frame
+            sec_first_stamp = msg.packets[0].stamp.secs
+            nsec_first_stamp = msg.packets[0].stamp.nsecs
 
             for i, packet in enumerate(msg.packets[:-1]):
                 # Get cartesian points from UDP packet and append to numpy array
                 tmp_point_array, tmp_reflectance_array = self.raw_hesai_to_cartesian(packet.data)
 
                 # Append new data to existing array
-                point_array = np.append(point_array, tmp_point_array, axis=0)
-                reflectance_array = np.append(reflectance_array, tmp_reflectance_array, axis=0)
+                point_cloud_array = np.append(point_cloud_array, np.hstack((tmp_point_array, tmp_reflectance_array, np.ones_like(tmp_reflectance_array) * packet.stamp.nsecs)), axis=0)
 
-                """print(packet.stamp)
-                print(msg.packets[0].stamp.secs, packet.stamp.secs)"""
-
-            # Put values into pointcloud object
-            pcd.points = o3d.utility.Vector3dVector(point_array)
-            pcd.colors = o3d.utility.Vector3dVector(np.repeat(reflectance_array, 3, axis=1) / 255)
+            # Assemble pandas dataframe
+            frame_df = pd.DataFrame(data=point_cloud_array, columns=['x', 'y', 'z', 'reflectance', 'timestamp'])
+            frame_df = frame_df.astype(dtype={'x':'f8', 'y':'f8', 'z':'f8', 'reflectance':'u1', 'timestamp':'u4'})
 
             # Export data
-            point_cloud_file_name = ("%s.%s.ply" % (msg.packets[0].stamp.secs, msg.packets[0].stamp.nsecs))
-            o3d.io.write_point_cloud(os.path.join(export_directory, point_cloud_file_name), pcd)
+            comment = 'timestamp_first_package_of_frame: %s' % sec_first_stamp
+            point_cloud_file_name = ("%s.%s.ply" % (sec_first_stamp, nsec_first_stamp))
+            ply_data_types = [(name, dtype.type) for name, dtype in frame_df.dtypes.items()]
+            with open(os.path.join(export_directory, point_cloud_file_name), "wb") as f:
+                wr = PLYWriter(f, ply_data_types, comments='Placeholder')
+                wr.writeDataFrame(frame_df)
+                wr.finish()
+
+            # Debug print timing
+            end_time = datetime.now()
+            print('Duration: {}'.format(end_time - start_time))
 
     def raw_hesai_to_cartesian(self, packet_data):
         # Create data transfer object from binary UDP package
@@ -138,7 +167,7 @@ class rosbag_reader:
         for block in hesai_udp_dto.blocks[block_iter_start::block_iter_step]:
             # Retrieve azimuth value for current block
             azimuth_rad = np.deg2rad(block.azimuth_deg)
-            azimuth_array = azimuth_offset_array + azimuth_rad
+            azimuth_array = (azimuth_offset_array + azimuth_rad) * -1
 
             # Get list of all distances and reflectances
             distance_array = np.asarray([channel.distance_value for channel in block.channel])/1000
@@ -309,7 +338,8 @@ def dec_2_dms(decimal):
 with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
     print(reader_object.topics)
 
-    #reader_object.export_pointclouds('/hesai/pandar_packets', sensor_name='lidar_0')
+    # TODO: Do this based on config file
+    reader_object.export_pointclouds('/hesai/pandar_packets', sensor_name='lidar_0')
     reader_object.export_images('/phone1/camera/image/compressed', sensor_name='camera_0')
 
     reader_object.export_1d_data('/phone1/android/magnetic_field', sensor_name='magnetic_field_sensor_0')
@@ -317,13 +347,7 @@ with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
     reader_object.export_1d_data('/phone1/android/imu', sensor_name='inertial_measurement_unit_0')
     reader_object.export_1d_data('/phone1/android/barometric_pressure', sensor_name='pressure_sensor_0')
 
-    #reader_object.export_1d_data('/note9/android/barometric_pressure')
-    # reader_object.export_1d_data('/phone1/android/illuminance')
-    # reader_object.export_1d_data('/phone1/android/imu')
-    # reader_object.export_1d_data('/phone1/android/fix')
-    #reader_object.export_1d_data('/phone1/android/magnetic_field')
-    #reader_object.export_pointclouds()
-    # reader_object.export_raw_lidar_data('/hesai/pandar_packets')
+
     print(reader_object.topics)
 
 """
