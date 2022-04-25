@@ -185,7 +185,6 @@ class rosbag_reader:
 
     def export_1d_data(self, topic_filter, sensor_name=None):
         """Function to export data from topics that deliver 1 dimensional data"""
-        # TODO: allow for multiple topics of same msg type. Current: first gets overwritten
         # Load message type from msg for correct csv translation
         topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic_filter)
         message_type = topic_meta.topics[topic_filter].msg_type
@@ -197,129 +196,123 @@ class rosbag_reader:
         if message_type == 'sensor_msgs/FluidPressure':
             # Assemble export filename
             if sensor_name == None:
-                export_filename = 'pressure_sensor_0.csv'
+                export_filename = 'pressure_sensor_0.feather'
             else:
-                export_filename = sensor_name + '.csv'
+                export_filename = sensor_name + '.feather'
             export_filename = os.path.join(self.bag_unpack_dir, export_filename)
 
-            # TODO: Think about changing this into a binary format (maybe from Pandas)
-            # Open file with context handler
-            with open(export_filename, 'w') as f:
-                # Write header
-                f.write('timestamp fluid_pressure variance\n')
+            # Create empty list for appension
+            dataframe_as_list = []
 
-                # Iterate over sensor messages
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-                    f.write('%.12f %.12f %.12f\n' % (msg.header.stamp.to_sec(), msg.fluid_pressure, msg.variance))
+            for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
+                dataframe_as_list.append([msg.header.stamp.to_sec(), msg.fluid_pressure])
+
+            # Save as pandas dataframe in feather file
+            dataframe = pd.DataFrame(dataframe_as_list, columns=['timestamp', 'fluid_pressure'])
+            dataframe.to_feather(export_filename)
 
         # Handle file export for illuminance data
         elif message_type == 'sensor_msgs/Illuminance':
             # Assemble export filename
             if sensor_name == None:
-                export_filename = 'illuminance_sensor_0.csv'
+                export_filename = 'illuminance_sensor_0.feather'
             else:
-                export_filename = sensor_name + '.csv'
+                export_filename = sensor_name + '.feather'
             export_filename = os.path.join(self.bag_unpack_dir, export_filename)
 
-            # TODO: Think about changing this into a binary format (maybe from Pandas)
-            # Open file with context handler
-            with open(export_filename, 'w') as f:
-                # Write header
-                f.write('timestamp illuminance variance\n')
+            # Create empty list for appension
+            dataframe_as_list = []
 
-                # Iterate over sensor messages
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-                    f.write('%.12f %.12f %.12f\n' % (msg.header.stamp.to_sec(), msg.illuminance, msg.variance))
+            for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
+                dataframe_as_list.append([msg.header.stamp.to_sec(), msg.illuminance])
+
+            # Save as pandas dataframe in feather file
+            dataframe = pd.DataFrame(dataframe_as_list, columns=['timestamp', 'illuminance'])
+            dataframe.to_feather(export_filename)
 
         # Handle file export for IMU data
         elif message_type == 'sensor_msgs/Imu':
             # Assemble export filename
             if sensor_name == None:
-                export_filename = 'inertial_measurement_unit_0.csv'
+                export_filename = 'inertial_measurement_unit_0.feather'
             else:
-                export_filename = sensor_name + '.csv'
+                export_filename = sensor_name + '.feather'
             export_filename = os.path.join(self.bag_unpack_dir, export_filename)
 
-            # TODO: Think about changing this into a binary format (maybe from Pandas)
-            # Open file with context handler
-            with open(export_filename, 'w') as f:
-                # Write header
-                f.write('timestamp or_x or_y or_z or_w li_ac_x li_ac_y li_ac_z an_ve_x an_ve_y an_ve_z\n')
+            # Create empty list for appension
+            dataframe_as_list = []
 
-                # Iterate over sensor messages
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-                    # Assemble line output by conversion of message into list
-                    content_list = [msg.header.stamp.to_sec()] + quaternion_to_list(msg.orientation) + vec3_to_list(
-                        msg.linear_acceleration) + vec3_to_list(msg.angular_velocity)
-                    f.write('%.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f\n' % tuple(content_list))
+            for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
+                dataframe_as_list.append([msg.header.stamp.to_sec()] + quaternion_to_list(msg.orientation) + vec3_to_list(
+                        msg.linear_acceleration) + vec3_to_list(msg.angular_velocity))
+
+            # Save as pandas dataframe in feather file
+            dataframe = pd.DataFrame(dataframe_as_list, columns=['timestamp', 'or_x', 'or_y', 'or_z', 'or_w', 'li_ac_x', 'li_ac_y', 'li_ac_z', 'an_ve_x', 'an_ve_y', 'an_ve_z'])
+            dataframe.to_feather(export_filename)
 
         # Handle file export for magnetic field data
         elif message_type == 'sensor_msgs/MagneticField':
             # Assemble export filename
             if sensor_name == None:
-                export_filename = 'magnetic_field_sensor_0.csv'
+                export_filename = 'magnetic_field_sensor_0.feather'
             else:
-                export_filename = sensor_name + '.csv'
+                export_filename = sensor_name + '.feather'
             export_filename = os.path.join(self.bag_unpack_dir, export_filename)
 
-            # TODO: Think about changing this into a binary format (maybe from Pandas)
-            # Open file with context handler
-            with open(export_filename, 'w') as f:
-                # Write header
-                f.write('timestamp x y z\n')
+            # Create empty list for appension
+            dataframe_as_list = []
 
-                # Iterate over sensor messages
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-                    # Assemble line output by conversion of message into list
-                    f.write('%.12f %.12f %.12f %.12f\n' % tuple(
-                        [msg.header.stamp.to_sec()] + vec3_to_list(msg.magnetic_field)))
+            for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
+                dataframe_as_list.append([msg.header.stamp.to_sec()] + quaternion_to_list(msg.magnetic_field))
+
+            # Save as pandas dataframe in feather file
+            dataframe = pd.DataFrame(dataframe_as_list, columns=['timestamp', 'x', 'y', 'z'])
+            dataframe.to_feather(export_filename)
 
         # Handle file export for range data
         elif message_type == 'sensor_msgs/Range':
             # Assemble export filename
             if sensor_name == None:
-                export_filename = 'range_sensor_0.csv'
+                export_filename = 'range_sensor_0.feather'
             else:
-                export_filename = sensor_name + '.csv'
+                export_filename = sensor_name + '.feather'
             export_filename = os.path.join(self.bag_unpack_dir, export_filename)
 
-            # TODO: Think about changing this into a binary format (maybe from Pandas)
-            # Open file with context handler
-            with open(export_filename, 'w') as f:
-                # Write header
-                f.write('timestamp range_in_cm\n')
+            # Create empty list for appension
+            dataframe_as_list = []
+            last_range_valid = True
 
-                # Iterate over sensor messages
-                last_range_valid = True
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-                    # Assemble line output by conversion of message into list
-                    if msg.range <= msg.max_range:
-                        f.write('%.12f %.2f\n' % (msg.header.stamp.to_sec(), msg.range))
-                        last_range_valid = True
-                    elif last_range_valid == True:
-                        f.write('%.12f nan\n' % msg.header.stamp.to_sec())
-                        last_range_valid = False
+            for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
+                # Assemble line output by conversion of message into list
+                if msg.range <= msg.max_range:
+                    dataframe_as_list.append([msg.header.stamp.to_sec(), msg.range])
+                    last_range_valid = True
+                elif last_range_valid == True:
+                    dataframe_as_list.append([msg.header.stamp.to_sec(), np.nan])
+                    last_range_valid = False
+
+            # Save as pandas dataframe in feather file
+            dataframe = pd.DataFrame(dataframe_as_list, columns=['timestamp', 'range_cm'])
+            dataframe.to_feather(export_filename)
 
         # Handle file export for gnss data
         elif message_type == 'sensor_msgs/NavSatFix':
             # Assemble export filename
             if sensor_name == None:
-                export_filename = 'gnss_0.csv'
+                export_filename = 'gnss_0.feather'
             else:
-                export_filename = sensor_name + '.csv'
+                export_filename = sensor_name + '.feather'
             export_filename = os.path.join(self.bag_unpack_dir, export_filename)
 
-            # TODO: Think about changing this into a binary format (maybe from Pandas)
-            # Open file with context handler
-            with open(export_filename, 'w') as f:
-                # Write header
-                f.write('timestamp alt lon lat ser fix\n')
+            # Create empty list for appension
+            dataframe_as_list = []
 
-                # Iterate over sensor messages
-                last_range_valid = True
-                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-                    # Assemble line output by conversion of message into list
-                    f.write('%.12f %.4f %.8f %.8f %s %s\n' % (msg.header.stamp.to_sec(), msg.altitude, msg.longitude, msg.latitude, msg.status.service, msg.status.status))
+            for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
+                dataframe_as_list.append([msg.header.stamp.to_sec(), msg.altitude, msg.longitude, msg.latitude, msg.status.service, msg.status.status])
+
+            # Save as pandas dataframe in feather file
+            dataframe = pd.DataFrame(dataframe_as_list, columns=['timestamp', 'alt', 'lon', 'lat', 'ser', 'fix'])
+            dataframe.to_feather(export_filename)
 
         else:
             # TODO: throw exception
