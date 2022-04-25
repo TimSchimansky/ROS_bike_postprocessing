@@ -210,7 +210,7 @@ class rosbag_reader:
 
                 # Iterate over sensor messages
                 for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-                    f.write('%.12f %.12f %.12f\n' % (t.to_sec(), msg.fluid_pressure, msg.variance))
+                    f.write('%.12f %.12f %.12f\n' % (msg.header.stamp.to_sec(), msg.fluid_pressure, msg.variance))
 
         # Handle file export for illuminance data
         elif message_type == 'sensor_msgs/Illuminance':
@@ -229,7 +229,7 @@ class rosbag_reader:
 
                 # Iterate over sensor messages
                 for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-                    f.write('%.12f %.12f %.12f\n' % (t.to_sec(), msg.illuminance, msg.variance))
+                    f.write('%.12f %.12f %.12f\n' % (msg.header.stamp.to_sec(), msg.illuminance, msg.variance))
 
         # Handle file export for IMU data
         elif message_type == 'sensor_msgs/Imu':
@@ -249,7 +249,7 @@ class rosbag_reader:
                 # Iterate over sensor messages
                 for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
                     # Assemble line output by conversion of message into list
-                    content_list = [t.to_sec()] + quaternion_to_list(msg.orientation) + vec3_to_list(
+                    content_list = [msg.header.stamp.to_sec()] + quaternion_to_list(msg.orientation) + vec3_to_list(
                         msg.linear_acceleration) + vec3_to_list(msg.angular_velocity)
                     f.write('%.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f %.12f\n' % tuple(content_list))
 
@@ -272,7 +272,54 @@ class rosbag_reader:
                 for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
                     # Assemble line output by conversion of message into list
                     f.write('%.12f %.12f %.12f %.12f\n' % tuple(
-                        [t.to_sec()] + vec3_to_list(msg.magnetic_field)))
+                        [msg.header.stamp.to_sec()] + vec3_to_list(msg.magnetic_field)))
+
+        # Handle file export for range data
+        elif message_type == 'sensor_msgs/Range':
+            # Assemble export filename
+            if sensor_name == None:
+                export_filename = 'range_sensor_0.csv'
+            else:
+                export_filename = sensor_name + '.csv'
+            export_filename = os.path.join(self.bag_unpack_dir, export_filename)
+
+            # TODO: Think about changing this into a binary format (maybe from Pandas)
+            # Open file with context handler
+            with open(export_filename, 'w') as f:
+                # Write header
+                f.write('timestamp range_in_cm\n')
+
+                # Iterate over sensor messages
+                last_range_valid = True
+                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
+                    # Assemble line output by conversion of message into list
+                    if msg.range <= msg.max_range:
+                        f.write('%.12f %.2f\n' % (msg.header.stamp.to_sec(), msg.range))
+                        last_range_valid = True
+                    elif last_range_valid == True:
+                        f.write('%.12f nan\n' % msg.header.stamp.to_sec())
+                        last_range_valid = False
+
+        # Handle file export for gnss data
+        elif message_type == 'sensor_msgs/NavSatFix':
+            # Assemble export filename
+            if sensor_name == None:
+                export_filename = 'gnss_0.csv'
+            else:
+                export_filename = sensor_name + '.csv'
+            export_filename = os.path.join(self.bag_unpack_dir, export_filename)
+
+            # TODO: Think about changing this into a binary format (maybe from Pandas)
+            # Open file with context handler
+            with open(export_filename, 'w') as f:
+                # Write header
+                f.write('timestamp alt lon lat ser fix\n')
+
+                # Iterate over sensor messages
+                last_range_valid = True
+                for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
+                    # Assemble line output by conversion of message into list
+                    f.write('%.12f %.4f %.8f %.8f %s %s\n' % (msg.header.stamp.to_sec(), msg.altitude, msg.longitude, msg.latitude, msg.status.service, msg.status.status))
 
         else:
             # TODO: throw exception
@@ -335,17 +382,19 @@ def dec_2_dms(decimal):
 #fix_bag.fix_bagfile_header("../2022-03-24-11-40-06.bag", "../test3.bag")
 
 # with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
-with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
+with rosbag_reader("../side_sensor_trajectory_fix.bag") as reader_object:
     print(reader_object.topics)
 
     # TODO: Do this based on config file
-    reader_object.export_pointclouds('/hesai/pandar_packets', sensor_name='lidar_0')
-    reader_object.export_images('/phone1/camera/image/compressed', sensor_name='camera_0')
+    #reader_object.export_pointclouds('/hesai/pandar_packets', sensor_name='lidar_0')
+    #reader_object.export_images('/phone1/camera/image/compressed', sensor_name='camera_0')
 
-    reader_object.export_1d_data('/phone1/android/magnetic_field', sensor_name='magnetic_field_sensor_0')
-    reader_object.export_1d_data('/phone1/android/illuminance', sensor_name='illuminance_sensor_0')
-    reader_object.export_1d_data('/phone1/android/imu', sensor_name='inertial_measurement_unit_0')
-    reader_object.export_1d_data('/phone1/android/barometric_pressure', sensor_name='pressure_sensor_0')
+    #reader_object.export_1d_data('/phone1/android/magnetic_field', sensor_name='magnetic_field_sensor_0')
+    #reader_object.export_1d_data('/phone1/android/illuminance', sensor_name='illuminance_sensor_0')
+    #reader_object.export_1d_data('/phone1/android/imu', sensor_name='inertial_measurement_unit_0')
+    reader_object.export_1d_data('/note9/android/barometric_pressure', sensor_name='pressure_sensor_0')
+    reader_object.export_1d_data('/side_distance', sensor_name='left_range_sensor_0')
+    reader_object.export_1d_data('/note9/android/fix', sensor_name='gnss_0')
 
 
     print(reader_object.topics)
