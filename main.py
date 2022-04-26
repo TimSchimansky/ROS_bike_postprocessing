@@ -8,6 +8,7 @@ import pandas as pd
 import geopandas as gpd
 #import open3d as o3d
 from io import StringIO
+import json
 import csv
 from shapely.geometry import Point
 
@@ -61,14 +62,14 @@ class rosbag_reader:
         self.source_bag = rosbag.Bag(bag_file_name, 'r')
         self.topics = self.source_bag.get_type_and_topic_info()[1].keys()
 
-        # Keep track of exported topics
-        # TODO: add column for comments
-        self.exported_data = []
-
         # Prepare export folder if not existing
         self.bag_unpack_dir = os.path.splitext(os.path.basename(bag_file_name))[0]
         if not os.path.exists(self.bag_unpack_dir):
             os.makedirs(self.bag_unpack_dir)
+
+        # Keep track of exported topics
+        self.exported_data = dict()
+        self.exported_data['working_directory'] = self.bag_unpack_dir
 
     def __enter__(self):
         """This function is used for the (with .. as ..) call"""
@@ -78,17 +79,16 @@ class rosbag_reader:
         """This function is used to close all connections to files when this class is not needed anymore"""
         self.source_bag.close()
 
-        # Write overview csv for bagfile
-        with open(os.path.join(self.bag_unpack_dir, 'overview.csv'), 'w') as f:
-            f.write('filename msg_type\n')
-            for line in self.exported_data:
-                f.write(line + '\n')
+        # Write overview json for bagfile
+        with open(os.path.join(self.bag_unpack_dir, 'overview.json'), 'w') as f:
+            json.dump(self.exported_data, f, indent=4)
 
     def export_images(self, topic, sensor_name='camera_0'):
-        # TODO: make this parameters of the function
-        camera_unpack_subdir = sensor_name
+        # TODO: implement image subsampling
+        topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic)
 
         # Prepare export folder if not existing
+        camera_unpack_subdir = sensor_name
         export_directory = os.path.join(self.bag_unpack_dir, camera_unpack_subdir)
         if not os.path.exists(export_directory):
             os.makedirs(export_directory)
@@ -101,7 +101,12 @@ class rosbag_reader:
             image_file_name = ("%s.%s.png" % (msg.header.stamp.secs, msg.header.stamp.nsecs))
             cv2.imwrite(os.path.join(export_directory, image_file_name), temp_image)
 
+        # Add to list of exported data
+        self.add_to_meta_data(camera_unpack_subdir, topic_meta.topics[topic].msg_type, topic, topic_meta.topics[topic].frequency, topic_meta.topics[topic].message_count, is_in_folder=True)
+
     def export_pointclouds(self, topic, sensor_name='lidar_0'):
+        topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic)
+
         # Prepare export folder if not existing
         lidar_unpack_subdir = sensor_name
         export_directory = os.path.join(self.bag_unpack_dir, lidar_unpack_subdir)
@@ -147,6 +152,9 @@ class rosbag_reader:
             end_time = datetime.now()
             print('Duration: {}'.format(end_time - start_time))
 
+        # Add to list of exported data
+        self.add_to_meta_data(lidar_unpack_subdir, topic_meta.topics[topic].msg_type, topic, topic_meta.topics[topic].frequency, topic_meta.topics[topic].message_count, is_in_folder=True)
+
     def raw_hesai_to_cartesian(self, packet_data):
         # Create data transfer object from binary UDP package
         hesai_udp_dto = HesaiPandar64Packets.from_bytes(packet_data)
@@ -188,6 +196,9 @@ class rosbag_reader:
         # Load message type from msg for correct csv translation
         topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic_filter)
         message_type = topic_meta.topics[topic_filter].msg_type
+
+        # Flag for overview json
+        is_geo = False
 
         # Debug output
         print('DEBUG: message type of topic: ' + topic_filter + ' is: ' + message_type)
@@ -297,6 +308,9 @@ class rosbag_reader:
 
         # Handle file export for gnss data
         elif message_type == 'sensor_msgs/NavSatFix':
+            # Set flag for geodata
+            is_geo = True
+
             # Assemble export filename
             if sensor_name == None:
                 export_filename = 'gnss_0.feather'
@@ -312,6 +326,11 @@ class rosbag_reader:
 
             # Save as pandas dataframe in feather file
             dataframe = pd.DataFrame(dataframe_as_list, columns=['timestamp', 'alt', 'lon', 'lat', 'ser', 'fix'])
+
+            # Convert to geopandas dataframe
+            dataframe = gpd.GeoDataFrame(dataframe, geometry=gpd.points_from_xy(dataframe.lon, dataframe.lat))
+            dataframe.set_crs(epsg=4326, inplace=True)
+
             dataframe.to_feather(export_filename)
 
         else:
@@ -320,22 +339,44 @@ class rosbag_reader:
             pass
 
         # Add to list of exported data
-        self.exported_data.append(export_filename + ' ' + message_type + ' ' + topic_filter)
+        self.add_to_meta_data(export_filename, message_type, topic_filter, topic_meta.topics[topic_filter].frequency, topic_meta.topics[topic_filter].message_count, is_geo=is_geo)
+
+    def add_to_meta_data(self, export_filepath, message_type, topic_name, frequency, message_count, is_in_folder=False, is_geo=False):
+        # Split path, filename and suffix
+        export_filename = os.path.basename(export_filepath)
+        export_filename_pure = export_filename.split('.')[0]
+
+        # Add to list of exported data
+        self.exported_data[export_filename_pure] = dict()
+        self.exported_data[export_filename_pure]['message_type'] = message_type
+        self.exported_data[export_filename_pure]['topic_name'] = topic_name
+        self.exported_data[export_filename_pure]['frequency'] = frequency
+        self.exported_data[export_filename_pure]['message_count'] = message_count
+        self.exported_data[export_filename_pure]['is_in_folder'] = is_in_folder
+        self.exported_data[export_filename_pure]['is_geo'] = is_geo
 
 class dataframe_with_meta:
-    def __init__(self, dataframe, message_type, orig_filename):
+    def __init__(self, dataframe, meta, orig_file_name):
         self.dataframe = dataframe
-        self.message_type = message_type
-        self.orig_filename = orig_filename
+        self.message_type = meta['message_type']
+        self.orig_topic_name = meta['topic_name']
+        self.orig_file_name = orig_file_name
+        self.frequency = meta['frequency']
+        self.message_count = meta['message_count']
+        self.is_geo = meta['is_geo']
+        self.is_in_folder = meta['is_in_folder']
+        self.orig_file_type = '.feather'
 
 class data_as_pandas:
     def __init__(self, directory):
         self.working_directory = directory
 
-        # Load overview csv
-        self.data_file_list = pd.read_csv(os.path.join(self.working_directory, 'overview.csv'), sep=' ')
-        """for line in self.data_file_list.iterrows():
-            print(line[1][0])"""
+        # Load overview json
+        with open(os.path.join(self.working_directory, 'overview.json'), 'r') as f:
+            self.overview = json.loads(f.read())
+
+        # remove working directory entry
+        self.overview.pop('working_directory')
 
         # Create empty dict for pandas dataframes
         self.dataframes = dict()
@@ -347,24 +388,26 @@ class data_as_pandas:
         unix_time_parser = lambda x: datetime.fromtimestamp(float(x))
 
         # Iterate over available files
-        for data_file in self.data_file_list.iterrows():
-            # Assemble file_name and tmp_topic
-            file_name = data_file[1][0]
-            tmp_topic = data_file[1][1]
-
-            # Load from csv into pandas
-            import_path = os.path.join(self.working_directory, file_name)
-
-            # In case of GNSS data create geopandas dataframe
-            if tmp_topic == 'sensor_msgs/NavSatFix':
-                # tmp_df = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
-                self.dataframes[tmp_topic] = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
-                self.dataframes[tmp_topic].dataframe = gpd.GeoDataFrame(self.dataframes[tmp_topic].dataframe, geometry=gpd.points_from_xy(self.dataframes[tmp_topic].dataframe.lon, self.dataframes[tmp_topic].dataframe.lat))
-
-                # Set coordinate system
-                self.dataframes[tmp_topic].dataframe.set_crs(epsg=4326, inplace=True)
+        for key, value in self.overview.items():
+            # Check if folder or 1d data
+            if value['is_in_folder']:
+                # TODO: Handle images and pointclouds
+                pass
             else:
-                self.dataframes[tmp_topic] = dataframe_with_meta(pd.read_csv(import_path, sep=' ', parse_dates=['timestamp'], date_parser=unix_time_parser, index_col='timestamp'), tmp_topic, file_name)
+                # Data is available as pandas dataframe in feather file
+                import_file_path = os.path.join(self.working_directory, key + '.feather')
+
+                # Decide between pandas and geopandas dataframe
+                if value['is_geo']:
+                    # Import data and save in dictionary as geopandas
+                    self.dataframes[key] = dataframe_with_meta(gpd.read_feather(import_file_path), value, key)
+                else:
+                    # Import data and save in dictionary as pandas
+                    self.dataframes[key] = dataframe_with_meta(pd.read_feather(import_file_path), value, key)
+
+                # Change unix timestamp to datetime
+                # TODO: add timestamp for sensor and for bag
+                self.dataframes[key].dataframe['timestamp'] = pd.to_datetime(self.dataframes[key].dataframe['timestamp'], unit='s')
 
 def dec_2_dms(decimal):
     minute, second = divmod(decimal*3600, 60)
@@ -388,12 +431,13 @@ with rosbag_reader("../side_sensor_trajectory_fix.bag") as reader_object:
     reader_object.export_1d_data('/note9/android/barometric_pressure', sensor_name='pressure_sensor_0')
     reader_object.export_1d_data('/side_distance', sensor_name='left_range_sensor_0')
     reader_object.export_1d_data('/note9/android/fix', sensor_name='gnss_0')
+    #reader_object.export_images('/side_view/image_raw/compressed', sensor_name='camera_0')
 
-
-    print(reader_object.topics)
-
+bag_pandas = data_as_pandas('side_sensor_trajectory_fix')
+bag_pandas.load_from_working_directory()
+print(1)
 """
-bag_pandas = data_as_pandas('kleefeld_trjectory_1')
+
 bag_pandas.load_from_working_directory()
 
 # ---- Testing below --------------------------------------------
