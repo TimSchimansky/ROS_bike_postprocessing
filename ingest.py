@@ -165,7 +165,8 @@ class rosbag_reader:
         """Function to export data from topics that deliver 1 dimensional data"""
 
         # Break if already exported and in overview
-        if self.overview[sensor_name]:
+
+        if sensor_name in self.overview.keys():
             print(sensor_name + ' was already exported')
             return
 

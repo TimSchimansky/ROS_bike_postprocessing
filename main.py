@@ -85,7 +85,7 @@ class data_as_pandas:
 #2022-04-28-track3.bag
 
 # with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
-with rosbag_reader("../2022-04-28-track3.bag") as reader_object:
+with rosbag_reader("../2022-04-28-track1.bag") as reader_object:
     print(reader_object.topics)
 
     # TODO: Do this based on config file
@@ -100,7 +100,7 @@ with rosbag_reader("../2022-04-28-track3.bag") as reader_object:
     reader_object.export_1d_data('/note9/android/fix', sensor_name='gnss_0')
     #reader_object.export_images('/side_view/image_raw/compressed', sensor_name='camera_0', sampling_step=10)
 
-bag_pandas = data_as_pandas('2022-04-28-track3')
+bag_pandas = data_as_pandas('2022-04-28-track1')
 bag_pandas.load_from_working_directory()
 print(1)
 
@@ -119,7 +119,7 @@ nav = bag_pandas.dataframes['gnss_0'].dataframe
 pre = bag_pandas.dataframes['left_range_sensor_0'].dataframe
 
 # TODO: TEMPORÄR FILTEr
-pre.loc[(pre.range_cm >= 200), 'range_cm'] = np.nan
+pre.loc[(pre.range_cm >= 150), 'range_cm'] = np.nan
 
 
 # Interpolate data
@@ -135,7 +135,7 @@ left_bound, lower_bound, right_bound, upper_bound = nav.total_bounds
 
 # Calculate zoom level from predefined destination width
 # TODO: Make destination width a hyper parameter
-zoom = map_plotting.determine_zoom_level(left_bound, right_bound, 100)
+zoom = map_plotting.determine_zoom_level(left_bound, right_bound, 500)
 map_img, bounding_box = map_plotting.generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom)
 
 # Plotting
