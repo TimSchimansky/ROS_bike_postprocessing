@@ -4,6 +4,9 @@ from itertools import product
 from skimage import io as skio
 import numpy as np
 import geopandas as gpd
+import matplotlib.pyplot as plt
+
+from helper import *
 
 
 def point_to_pixels(lon, lat, zoom, tile_size):
@@ -14,6 +17,7 @@ def point_to_pixels(lon, lat, zoom, tile_size):
     y = int((1.0 - math.log(math.tan(lat) + (1.0 / math.cos(lat))) / math.pi) / 2.0 * r)
     return x, y
 
+
 def pixels_to_points(x, y, zoom, tile_size):
     """convert web mercator to gps coordinates - this function is provided by the open Street maps wiki"""
     r = math.pow(2, zoom) * tile_size
@@ -21,6 +25,7 @@ def pixels_to_points(x, y, zoom, tile_size):
     lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * y / r)))
     lat_deg = math.degrees(lat_rad)
     return (lat_deg, lon_deg)
+
 
 def generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom, tile_size=256):
     # Convert to web mercator projection
@@ -73,6 +78,7 @@ def generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom, 
     # Return cutout and boundary tuple
     return whole_img[y0 - y:y1 - y, x0 - x:x1 - x, :], bounding_box
 
+
 def determine_zoom_level(left_bound, right_bound, destination_width_px, tile_size=256):
     # Generate list of zoom levels (width in degrees per tile) as lookup table
     zoom_lvls = np.asarray([360 / (2 ** i) for i in range(20)])
@@ -85,3 +91,63 @@ def determine_zoom_level(left_bound, right_bound, destination_width_px, tile_siz
 
     # Get zoom level from lookup table
     return (np.abs(zoom_lvls - tile_width_deg)).argmin()
+
+
+def calc_map_size(trajectory, destination_width):
+    # Calculate data boundaries
+    left_bound, lower_bound, right_bound, upper_bound = trajectory.total_bounds
+
+    # Calculate zoom level from predefined destination width
+    zoom = determine_zoom_level(left_bound, right_bound, destination_width)
+
+    return left_bound, lower_bound, right_bound, upper_bound, zoom
+
+
+def format_ticks_deg(ax, bounding_box):
+    # Set axes to be equal
+    ax.set_ylim(bounding_box.geometry.y[0], bounding_box.geometry.y[1])
+    ax.set_xlim(bounding_box.geometry.x[0], bounding_box.geometry.x[1])
+
+    # Reformat ticks to epsg:4326
+    ax.set_xticks(np.linspace(bounding_box.geometry.x[0], bounding_box.geometry.x[1], 5))
+    xlabel_array = np.linspace(bounding_box.to_crs(epsg=4326).geometry.x[0],
+                               bounding_box.to_crs(epsg=4326).geometry.x[1], 5)
+    xlabel_list = []
+    for i, xlabel in enumerate(xlabel_array):
+        xlabel_list.append(dec_2_dms(xlabel))
+    ax.set_xticklabels(xlabel_list)
+
+    ax.set_yticks(np.linspace(bounding_box.geometry.y[0], bounding_box.geometry.y[1], 4))
+    ylabel_array = np.linspace(bounding_box.to_crs(epsg=4326).geometry.y[0],
+                               bounding_box.to_crs(epsg=4326).geometry.y[1], 4)
+    ylabel_list = []
+    for i, ylabel in enumerate(ylabel_array):
+        ylabel_list.append(dec_2_dms(ylabel))
+    ax.set_yticklabels(ylabel_list)
+
+    return ax
+
+def create_map_plot(trajectory_df, secondary_data_df, secondary_data_key, destination_width=500):
+    # Calculate bounaries of map as well as zoom size
+    left_bound, lower_bound, right_bound, upper_bound, zoom = calc_map_size(trajectory_df, destination_width)
+
+    # Download tiles, fuse and crop to single image
+    map_img, bounding_box = generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom)
+
+    # Start plot
+    fig, ax = plt.subplots()
+
+    # Scatter GNSS data on top
+    xy = trajectory_df.to_crs(epsg=3857).geometry.map(lambda point: point.xy)
+    x, y = zip(*xy)
+    ax.scatter(x=x, y=y, c='red', cmap='cool', s=1)
+    ax.scatter(x=x, y=y, c=secondary_data_df[secondary_data_key], cmap='cool')
+
+    # Insert image into bounds
+    ax.imshow(map_img, extent=(bounding_box.geometry.x[0], bounding_box.geometry.x[1], bounding_box.geometry.y[0], bounding_box.geometry.y[1]))
+
+    # Set plotting and tick format
+    ax = format_ticks_deg(ax, bounding_box)
+
+    # Show the plot
+    plt.show()

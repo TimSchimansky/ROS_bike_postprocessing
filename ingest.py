@@ -50,7 +50,6 @@ class rosbag_reader:
             json.dump(self.overview, f, indent=4)
 
     def export_images(self, topic, sensor_name='camera_0', sampling_step=1):
-        # TODO: implement image subsampling
         topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic)
 
         # Prepare export folder if not existing
@@ -164,8 +163,12 @@ class rosbag_reader:
     def export_1d_data(self, topic_filter, sensor_name=None):
         """Function to export data from topics that deliver 1 dimensional data"""
 
-        # Break if already exported and in overview
+        # Throw warning if topic does not exist ant skip
+        if topic_filter not in self.topics:
+            warnings.warn('The topic ' + topic_filter + ' is not available in this bag file!')
+            return
 
+        # Break if already exported and in overview
         if sensor_name in self.overview.keys():
             print(sensor_name + ' was already exported')
             return

@@ -82,10 +82,11 @@ class data_as_pandas:
 #fix_bag.fix_bagfile_header("../2022-03-24-11-40-06.bag", "../test3.bag")
 
 
-#2022-04-28-track3.bag
+# 2022-04-28-track3.bag
+# lidar_test
 
 # with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
-with rosbag_reader("../2022-04-28-track1.bag") as reader_object:
+with rosbag_reader("../2022-04-28-track3.bag") as reader_object:
     print(reader_object.topics)
 
     # TODO: Do this based on config file
@@ -98,9 +99,9 @@ with rosbag_reader("../2022-04-28-track1.bag") as reader_object:
     reader_object.export_1d_data('/note9/android/barometric_pressure', sensor_name='pressure_sensor_0')
     reader_object.export_1d_data('/side_distance', sensor_name='left_range_sensor_0')
     reader_object.export_1d_data('/note9/android/fix', sensor_name='gnss_0')
-    #reader_object.export_images('/side_view/image_raw/compressed', sensor_name='camera_0', sampling_step=10)
+    reader_object.export_images('/side_view/image_raw/compressed', sensor_name='camera_0', sampling_step=10)
 
-bag_pandas = data_as_pandas('2022-04-28-track1')
+bag_pandas = data_as_pandas('2022-04-28-track3')
 bag_pandas.load_from_working_directory()
 print(1)
 
@@ -115,11 +116,9 @@ sns.set_theme()
 
 #ran = bag_pandas.dataframes['left_range_sensor_0'].dataframe
 nav = bag_pandas.dataframes['gnss_0'].dataframe
-#pre = bag_pandas.dataframes['pressure_sensor_0'].dataframe
-pre = bag_pandas.dataframes['left_range_sensor_0'].dataframe
+pre = bag_pandas.dataframes['pressure_sensor_0'].dataframe
+#pre = bag_pandas.dataframes['left_range_sensor_0'].dataframe
 
-# TODO: TEMPORÄR FILTEr
-pre.loc[(pre.range_cm >= 150), 'range_cm'] = np.nan
 
 
 # Interpolate data
@@ -128,66 +127,9 @@ nav_pre = pd.DataFrame(nav.iloc[:,1:-1]).reindex(index=mixed_index).interpolate(
 nav_pre = gpd.GeoDataFrame(nav_pre, geometry=gpd.points_from_xy(nav_pre.lon, nav_pre.lat))
 nav_pre.set_crs(epsg=4326, inplace=True)
 
-# Calculate data boundaries
-#left_bound, right_bound = 9.778970033148356, 9.792782600356505
-#upper_bound, lower_bound = 52.377849536057006, 52.370752181339995
-left_bound, lower_bound, right_bound, upper_bound = nav.total_bounds
+# TODO: TEMPORÄR FILTEr ------------------------------------------------------------------------
+#pre.loc[(pre.range_cm >= 150), 'range_cm'] = np.nan
 
-# Calculate zoom level from predefined destination width
-# TODO: Make destination width a hyper parameter
-zoom = map_plotting.determine_zoom_level(left_bound, right_bound, 500)
-map_img, bounding_box = map_plotting.generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom)
+# Plot as map
+map_plotting.create_map_plot(nav_pre, pre, 'fluid_pressure', destination_width=200)
 
-# Plotting
-fig, ax = plt.subplots()
-
-# Scatter GNSS data on top
-xy = nav_pre.to_crs(epsg=3857).geometry.map(lambda point: point.xy)
-x, y = zip(*xy)
-ax.scatter(x=x, y=y, c=pre.range_cm, cmap='cool')
-
-# Insert image into boundsg
-ax.imshow(map_img, extent=(bounding_box.geometry.x[0], bounding_box.geometry.x[1], bounding_box.geometry.y[0], bounding_box.geometry.y[1]))
-
-# Set axes to be equal
-#ax.axis('equal')
-ax.set_ylim(bounding_box.geometry.y[0], bounding_box.geometry.y[1])
-ax.set_xlim(bounding_box.geometry.x[0], bounding_box.geometry.x[1])
-
-# Reformat ticks to epsg:4326
-ax.set_xticks(np.linspace(bounding_box.geometry.x[0], bounding_box.geometry.x[1], 5))
-xlabel_array = np.linspace(bounding_box.to_crs(epsg=4326).geometry.x[0], bounding_box.to_crs(epsg=4326).geometry.x[1], 5)
-xlabel_list = []
-for i, xlabel in enumerate(xlabel_array):
-    xlabel_list.append(dec_2_dms(xlabel))
-ax.set_xticklabels(xlabel_list)
-
-ax.set_yticks(np.linspace(bounding_box.geometry.y[0], bounding_box.geometry.y[1], 4))
-ylabel_array = np.linspace(bounding_box.to_crs(epsg=4326).geometry.y[0], bounding_box.to_crs(epsg=4326).geometry.y[1], 4)
-ylabel_list = []
-for i, ylabel in enumerate(ylabel_array):
-    ylabel_list.append(dec_2_dms(ylabel))
-ax.set_yticklabels(ylabel_list)
-
-# Show the plot
-plt.show()
-
-
-print(1)
-
-"""# Interpolate pressure data to magnetic data
-mixed_index = mag.index.join(pre.index, how='outer')
-pre_mag = pre.reindex(index=mixed_index).interpolate().reindex(mag.index)
-
-
-
-
-# tmp plotting
-sns.lineplot(data=mag.x, color="b")
-sns.lineplot(data=mag.y, color="g")
-sns.lineplot(data=mag.z, color="r")
-ax2 = plt.twinx()
-sns.lineplot(data=pre_mag.fluid_pressure, color="c", ax=ax2)
-plt.show()
-
-print(1)"""
