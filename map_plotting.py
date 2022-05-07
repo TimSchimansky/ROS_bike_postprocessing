@@ -5,6 +5,7 @@ from skimage import io as skio
 import numpy as np
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 from helper import *
 
@@ -127,7 +128,17 @@ def format_ticks_deg(ax, bounding_box):
 
     return ax
 
-def create_map_plot(trajectory_df, secondary_data_df, secondary_data_key, destination_width=500):
+
+def create_map_plot(trajectory_df, secondary_data_df, secondary_data_key, tertiary_data_df=None, tertiary_data_key=None, destination_width=500):
+    # If no tertiary data given, replace with constant
+    if tertiary_data_df.empty:
+        plot_sizes = 2
+    else:
+        plot_sizes = ((tertiary_data_df[tertiary_data_key]-min(tertiary_data_df[tertiary_data_key]))**4)/100000000
+
+    # Apply the default theme
+    sns.set_theme()
+
     # Calculate bounaries of map as well as zoom size
     left_bound, lower_bound, right_bound, upper_bound, zoom = calc_map_size(trajectory_df, destination_width)
 
@@ -140,8 +151,8 @@ def create_map_plot(trajectory_df, secondary_data_df, secondary_data_key, destin
     # Scatter GNSS data on top
     xy = trajectory_df.to_crs(epsg=3857).geometry.map(lambda point: point.xy)
     x, y = zip(*xy)
-    ax.scatter(x=x, y=y, c='red', cmap='cool', s=1)
-    ax.scatter(x=x, y=y, c=secondary_data_df[secondary_data_key], cmap='cool')
+    #ax.scatter(x=x, y=y, c='red', cmap='cool', s=1)
+    ax.scatter(x=x, y=y, c=secondary_data_df[secondary_data_key], cmap='cool', s=plot_sizes)
 
     # Insert image into bounds
     ax.imshow(map_img, extent=(bounding_box.geometry.x[0], bounding_box.geometry.x[1], bounding_box.geometry.y[0], bounding_box.geometry.y[1]))

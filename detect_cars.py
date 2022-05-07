@@ -45,7 +45,7 @@ class CarDetector:
 
     def clean_up_results(self, detector_results):
         # Get list of pandas dataframes
-        raw_results_frame_list = detector_results.pandas().xywh
+        raw_results_frame_list = detector_results.pandas().xyxy
 
         # List of indexes marked for removal
         empty_frames_list = []
@@ -74,7 +74,7 @@ class CarDetector:
 
 if __name__ == "__main__":
     # Assemble path to sequence of images
-    image_sequence_path = os.path.join('2022-04-28-track3', 'camera_0')
+    image_sequence_path = os.path.join('2022-04-28-track2', 'camera_0')
 
     # Run detector
     car_detector = CarDetector(image_sequence_path)

@@ -52,6 +52,11 @@ class rosbag_reader:
     def export_images(self, topic, sensor_name='camera_0', sampling_step=1):
         topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic)
 
+        # Break if already exported and in overview
+        if sensor_name in self.overview.keys():
+            print(sensor_name + ' was already exported')
+            return
+
         # Prepare export folder if not existing
         camera_unpack_subdir = sensor_name
         export_directory = os.path.join(self.bag_unpack_dir, camera_unpack_subdir)
