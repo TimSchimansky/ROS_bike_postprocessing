@@ -90,16 +90,61 @@ class data_as_pandas:
                 self.dataframes[key].dataframe['timestamp_bagfile'] = pd.to_datetime(self.dataframes[key].dataframe['timestamp_bagfile'], unit='s')
                 self.dataframes[key].dataframe.set_index('timestamp_bagfile', inplace=True)
 
+def calculate_overlap(xmin, xmax, ymin, ymax):
+    # Define center
+    bb1 = [320, 960, 180, 540]
+
+    bb2 = [xmin, xmax, ymin, ymax]
+
+    assert bb1[0] < bb1[1]
+    assert bb1[2] < bb1[3]
+    assert bb2[0] < bb2[1]
+    assert bb2[2] < bb2[3]
+
+    # determine the coordinates of the intersection rectangle
+    x_left = max(bb1[0], bb2[0])
+    y_top = max(bb1[2], bb2[2])
+    x_right = min(bb1[1], bb2[1])
+    y_bottom = min(bb1[3], bb2[3])
+
+    if x_right < x_left or y_bottom < y_top:
+        return 0.0
+
+    # The intersection of two axis-aligned bounding boxes is always an
+    # axis-aligned bounding box
+    intersection_area = (x_right - x_left) * (y_bottom - y_top)
+
+    # compute the area of both AABBs
+    bb1_area = (bb1[1] - bb1[0]) * (bb1[3] - bb1[2])
+    bb2_area = (bb2[1] - bb2[0]) * (bb2[3] - bb2[2])
+
+    # compute the intersection over union by taking the intersection
+    # area and dividing it by the sum of prediction + ground-truth
+    # areas - the interesection area
+    iou = intersection_area / float(bb1_area + bb2_area - intersection_area)
+    assert iou >= 0.0
+    assert iou <= 1.0
+
+    return iou
+
 def filter_max_width(input_dataframe):
+    # TODO: redo less weird
+    # Calc overlap
+    input_dataframe['overlap'] = list(map(calculate_overlap, input_dataframe['xmin'], input_dataframe['xmax'], input_dataframe['ymin'], input_dataframe['ymax']))
+
     # Get index for max widths per timestamp
-    idx = input_dataframe.groupby(['timestamp'])['ymax'].transform(max) == input_dataframe['ymax']
+    #idx = input_dataframe.groupby(['timestamp'])['ymax'].transform(max) == input_dataframe['ymax']
+    idx = input_dataframe.groupby(['timestamp'])['overlap'].transform(max) == input_dataframe['overlap']
 
     # Only keep max values and width and timestamp column
     dataframe = input_dataframe[idx]
-    dataframe = dataframe[['ymax', 'timestamp']]
+    dataframe = dataframe[['overlap', 'timestamp']]
 
     dataframe['timestamp'] = pd.to_datetime(dataframe['timestamp'], unit='s')
     dataframe.set_index('timestamp', inplace=True)
+
+    # TODO: less weird
+    dataframe = dataframe.drop(dataframe[dataframe.overlap < 0.7].index)
 
     return dataframe
 
@@ -109,7 +154,7 @@ def filter_max_width(input_dataframe):
 # lidar_test
 
 # with rosbag_reader("../debug_test_camera_lidar.bag") as reader_object:
-with rosbag_reader("../2022-04-28-track2.bag") as reader_object:
+with rosbag_reader("../2022-04-28-track3.bag") as reader_object:
     print(reader_object.topics)
 
     # TODO: Do this based on config file
@@ -126,12 +171,12 @@ with rosbag_reader("../2022-04-28-track2.bag") as reader_object:
 
 # TODO: Add pretty print to json
 
-bag_pandas = data_as_pandas('2022-04-28-track2')
+bag_pandas = data_as_pandas('2022-04-28-track3')
 bag_pandas.load_from_working_directory()
 print(1)
 
-timeline_plotting.create_timeline_plot(bag_pandas, ['pressure_sensor_0', 'left_range_sensor_0'], ['fluid_pressure', 'range_cm'])
-
+timeline_plotting.create_timeline_plot(bag_pandas, ['pressure_sensor_0', 'left_range_sensor_0', 'camera_0'], ['fluid_pressure', 'range_cm', 'overlap'])
+#timeline_plotting.create_timeline_plot(bag_pandas, ['left_range_sensor_0'], ['range_cm'])
 # ---- Testing below --------------------------------------------
 
 # det = bag_pandas.dataframes['camera_0'].dataframe
@@ -139,7 +184,7 @@ timeline_plotting.create_timeline_plot(bag_pandas, ['pressure_sensor_0', 'left_r
 # bag_pandas.dataframes['sensor_msgs/NavSatFix'].dataframe['longitude']
 
 
-
+"""
 #ran = bag_pandas.dataframes['left_range_sensor_0'].dataframe
 nav = bag_pandas.dataframes['gnss_0'].dataframe
 #pre = bag_pandas.dataframes['pressure_sensor_0'].dataframe
@@ -165,3 +210,4 @@ print(0)
 # Plot as map
 map_plotting.create_map_plot(nav_pre, dist, 'range_cm', tertiary_data_df=width_pre, tertiary_data_key='ymax', destination_width=200)
 
+"""
