@@ -25,8 +25,12 @@ def generalize_dataframe(frame, key, sensor):
     # Remove rows of nan values in key column
     frame = frame.dropna(axis=0)
 
+    # Resample frame for displaying purposes
+    frame = frame.resample('0.25S', label='right', closed='right').median()
+
     # Normalize value column (purely for plotting and color range restrictions!)
-    frame[key] = (frame[key] - frame[key].min()) / (frame[key].max() - frame[key].min())
+    if frame[key].max() > 1 or frame[key].max() < 0 or frame[key].min() < 0 or frame[key].min() > 1:
+        frame[key] = (frame[key] - frame[key].min()) / (frame[key].max() - frame[key].min())
 
     # Rename main column to value
     return frame.rename(columns={key: 'value'})
@@ -55,32 +59,26 @@ def create_timeline_plot(bag_pandas_object, sensor_filter, sensor_keys):
         # Add to collector for concatenation
         frame_collector_list.append(tmp_frame)
 
-    # Concat all preprocessed data frames
-    collector_frame = pd.concat(frame_collector_list, axis=0)
-
-    """fig, ax = plt.subplots(1, figsize=(8, 3))
-
-    ax.barh(collector_frame.sensor_name, collector_frame.duration, left=collector_frame.from_timestamp)"""
-
+    # Setup for plotting
     sns.set_theme()
-    cmap = plt.cm.get_cmap('Spectral')
+    fig, ax = plt.subplots()
 
-    for i, (frame, duration) in enumerate(zip(frame_collector_list, duration_collector_list)):
+    # Set colormap
+    # TODO: find nicer one
+    cmap = plt.cm.get_cmap('autumn')
+    #cmap = sns.color_palette("coolwarm", as_cmap=True)
+
+    for i, frame in enumerate(frame_collector_list):
+        # Convert stripe positions to list of list
         tmp_frame_as_list = [[el] for el in list(frame.index)]
 
+        # Plot Stripes
+        plt.eventplot(tmp_frame_as_list, linelengths=0.8, linewidths=1, colors=cmap(frame.value), lineoffsets=[i] * len(frame)) #, colors=cmap(frame.value)) #np.array(frame.value)
 
-        plt.eventplot(tmp_frame_as_list, linelengths=0.75, linewidths=duration*10, colors=cmap(frame.value), lineoffsets=[i] * len(frame)) #, colors=cmap(frame.value)) #np.array(frame.value)
+    # Replace y ticks with sensor names
+    # TODO: Add pretty print names
+    ax.set_yticks(np.linspace(0, i, i+1))
+    ax.set_yticklabels(sensor_keys)
+
+    # Show plot
     plt.show()
-
-    """plt.eventplot([[1.5], [2.4], [5.6]], colors=[(1,0,0), (1,1,0), (1,0,0)], lineoffsets=[1] * 3)
-    plt.show()"""
-    """for i, (frame, duration) in enumerate(zip(frame_collector_list, duration_collector_list)):
-        sns.rugplot(y=i, x=frame.index, hue=frame['value'], height=0.15, legend = False) #jitter=False, marker="$\u2223$", size=5
-    plt.show()"""
-    # y=frame_collector_list[0]["sensor_name"]
-    """ax.xaxis.set_major_locator(mdates.MonthLocator())
-    ax.xaxis.set_minor_locator(mdates.DayLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))"""
-    #
-
-    #pass

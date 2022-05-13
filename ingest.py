@@ -259,7 +259,7 @@ class rosbag_reader:
             dataframe_as_list = []
 
             for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
-                dataframe_as_list.append([msg.header.stamp.to_sec(), t.to_sec()] + quaternion_to_list(msg.magnetic_field))
+                dataframe_as_list.append([msg.header.stamp.to_sec(), t.to_sec()] + vec3_to_list(msg.magnetic_field))
 
             # Save as pandas dataframe in feather file
             dataframe = pd.DataFrame(dataframe_as_list, columns=['timestamp_sensor', 'timestamp_bagfile', 'x', 'y', 'z'])

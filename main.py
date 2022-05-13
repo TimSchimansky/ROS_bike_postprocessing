@@ -144,7 +144,7 @@ def filter_max_width(input_dataframe):
     dataframe.set_index('timestamp', inplace=True)
 
     # TODO: less weird
-    dataframe = dataframe.drop(dataframe[dataframe.overlap < 0.7].index)
+    dataframe = dataframe.drop(dataframe[dataframe.overlap < 0.4].index)
 
     return dataframe
 
@@ -161,21 +161,22 @@ with rosbag_reader("../2022-04-28-track3.bag") as reader_object:
     #reader_object.export_pointclouds('/hesai/pandar_packets', sensor_name='lidar_0')
     #reader_object.export_images('/phone1/camera/image/compressed', sensor_name='camera_0')
 
-    #reader_object.export_1d_data('/phone1/android/magnetic_field', sensor_name='magnetic_field_sensor_0')
+    #reader_object.export_1d_data('/note9/android/magnetic_field', sensor_name='magnetic_field_sensor_0')
     #reader_object.export_1d_data('/phone1/android/illuminance', sensor_name='illuminance_sensor_0')
     #reader_object.export_1d_data('/phone1/android/imu', sensor_name='inertial_measurement_unit_0')
-    reader_object.export_1d_data('/note9/android/barometric_pressure', sensor_name='pressure_sensor_0')
-    reader_object.export_1d_data('/side_distance', sensor_name='left_range_sensor_0')
-    reader_object.export_1d_data('/note9/android/fix', sensor_name='gnss_0')
-    reader_object.export_images('/side_view/image_raw/compressed', sensor_name='camera_0', sampling_step=10)
+    #reader_object.export_1d_data('/note9/android/barometric_pressure', sensor_name='pressure_sensor_0')
+    #reader_object.export_1d_data('/side_distance', sensor_name='left_range_sensor_0')
+    #reader_object.export_1d_data('/note9/android/fix', sensor_name='gnss_0')
+    reader_object.export_images('/side_view/image_raw/compressed', sensor_name='camera_0', sampling_step=1)
 
 # TODO: Add pretty print to json
+# TODO: Add ignore_json to export althoug existent
 
-bag_pandas = data_as_pandas('2022-04-28-track3')
+"""bag_pandas = data_as_pandas('2022-04-28-track3')
 bag_pandas.load_from_working_directory()
 print(1)
 
-timeline_plotting.create_timeline_plot(bag_pandas, ['pressure_sensor_0', 'left_range_sensor_0', 'camera_0'], ['fluid_pressure', 'range_cm', 'overlap'])
+#timeline_plotting.create_timeline_plot(bag_pandas, ['pressure_sensor_0', 'magnetic_field_sensor_0', 'magnetic_field_sensor_0', 'magnetic_field_sensor_0', 'left_range_sensor_0', 'camera_0', 'interpretation/manual_ground_truth'], ['fluid_pressure', 'x', 'y', 'z','range_cm', 'overlap', 'vehicle_encounter'])
 #timeline_plotting.create_timeline_plot(bag_pandas, ['left_range_sensor_0'], ['range_cm'])
 # ---- Testing below --------------------------------------------
 
@@ -184,7 +185,7 @@ timeline_plotting.create_timeline_plot(bag_pandas, ['pressure_sensor_0', 'left_r
 # bag_pandas.dataframes['sensor_msgs/NavSatFix'].dataframe['longitude']
 
 
-"""
+
 #ran = bag_pandas.dataframes['left_range_sensor_0'].dataframe
 nav = bag_pandas.dataframes['gnss_0'].dataframe
 #pre = bag_pandas.dataframes['pressure_sensor_0'].dataframe
@@ -208,6 +209,6 @@ print(0)
 #pre.loc[(pre.range_cm >= 150), 'range_cm'] = np.nan
 
 # Plot as map
-map_plotting.create_map_plot(nav_pre, dist, 'range_cm', tertiary_data_df=width_pre, tertiary_data_key='ymax', destination_width=200)
+map_plotting.create_map_plot(nav_pre, dist, 'range_cm', tertiary_data_df=width_pre, tertiary_data_key='overlap', destination_width=200)
 
 """
