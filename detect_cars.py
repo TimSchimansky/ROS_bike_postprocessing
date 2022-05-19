@@ -74,7 +74,7 @@ class CarDetector:
 
 if __name__ == "__main__":
     # Assemble path to sequence of images
-    image_sequence_path = os.path.join('2022-04-28-track3', 'camera_0_subset')
+    image_sequence_path = os.path.join('2022-04-28-track3', 'camera_0_subset_1')
 
     # Run detector
     car_detector = CarDetector(image_sequence_path)

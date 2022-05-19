@@ -32,20 +32,30 @@ def draw_boxes(image, dataframe):
     return image
 
 
-def detect_most_prominent_values(input_array, angular_mode=True):
-    # Switch between angle and distance mode
-    if angular_mode:
-        # Return index of fullest histogram bin
-        return np.argmax(np.histogram(input_array, bins=360, range=(0,np.pi*2))[0])
+def detect_most_prominent_values(input_array):
+    # Round values to int
+    input_array = np.around(input_array)
 
-    else:
-        # Return index of fullest histogram bin
-        max_value_as_int = int(np.ceil(np.max(input_array)))
-        return np.argmax(np.histogram(input_array, bins=max_value_as_int, range=(0, max_value_as_int))[0])
+    # Return index of fullest histogram bin
+    max_value_as_int = int(np.ceil(np.max(input_array)))
+    min_value_as_int = int(np.min(input_array))
 
-def print_average_vector(flow_mag, flow_ang, dataframe, angle_buffer=20, dist_buffer=0):
+    # Ignore zero movements
+    input_array[input_array == 0] = 'nan'
+
+    # Index of max value
+    hist = np.histogram(input_array, bins=abs(max_value_as_int - min_value_as_int), range=(min_value_as_int, max_value_as_int))
+    prom_index = np.argmax(hist[0]) + 1
+
+    #print(hist[0])
+    #print(hist[1])
+
+    # Return integer value of most prominent bin
+    return hist[1][prom_index]
+
+def print_average_vector(flow, dataframe, angle_buffer=20, dist_buffer=0):
     # Get dimensions from flow result
-    width, height = flow_mag.shape
+    width, height, _ = flow.shape
 
     print('-----------------------------------------------------------')
     for index, line in dataframe.iterrows():
@@ -59,29 +69,35 @@ def print_average_vector(flow_mag, flow_ang, dataframe, angle_buffer=20, dist_bu
         box_mask = np.zeros((width, height), dtype=bool)
         box_mask[bounds[0]:bounds[1], bounds[2]:bounds[3]] = True
 
-        if np.isnan(np.rad2deg(np.average(flow_ang[box_mask]))):
-            print('Hi')
-
         # Get main angle of movement inside and outside of box
-        in_box_angle = detect_most_prominent_values(flow_ang[box_mask], angular_mode=True)
-        out_box_angle = detect_most_prominent_values(flow_ang[~box_mask], angular_mode=True)
-        in_out_angle_diff = abs((in_box_angle - out_box_angle + 180) % 360 - 180)
+        in_box_x = detect_most_prominent_values(flow[box_mask, 0])
+        in_box_y = detect_most_prominent_values(flow[box_mask, 1])
+        #in_out_angle_diff = abs((in_box_angle - out_box_angle + 180) % 360 - 180)
 
         # Get main amount of movement inside and outside of box
-        in_box_movement = detect_most_prominent_values(flow_mag[box_mask],angular_mode=False)
-        out_box_movement = detect_most_prominent_values(flow_mag[~box_mask], angular_mode=False)
-        in_out_movement_diff = abs(in_box_movement - out_box_movement)
+        out_box_x = detect_most_prominent_values(flow[~box_mask, 0])
+        out_box_y = detect_most_prominent_values(flow[~box_mask, 1])
+        #in_out_movement_diff = abs(in_box_movement - out_box_movement)
 
-        print('Winkel:')
-        print('Innerhalb: {0}° \t Außerhalb: {1}° \t Differenz: {2}°'.format(in_box_angle, out_box_angle, in_out_angle_diff))
-        print('Distanz:')
-        print('Innerhalb: {0}px \t Außerhalb: {1}px \t Differenz: {2}px'.format(in_box_movement, out_box_movement, in_out_movement_diff))
+        print('Inside ROI:')
+        print('x: {0}px \t y: {1}px'.format(in_box_x, in_box_y))
+        print('Outside ROI:')
+        print('x: {0}px \t y: {1}px'.format(out_box_x, out_box_y))
 
-        # Make prediction if car is moving in or against driving direction
-        if in_out_angle_diff <= 180 + angle_buffer and in_out_angle_diff >= 180 - angle_buffer:
-            print('Entgegenkommendes Auto')
+        diff_norm = np.sqrt((in_box_x - out_box_x)**2 + (in_box_y - out_box_y)**2)
+        print('Diff vector:')
+        print('x: {0}px \t y: {1}px \t norm: {2}px'.format(in_box_x - out_box_x, in_box_y - out_box_y, diff_norm))
 
-working_directory = '2022-04-28-track3/camera_0_subset'
+        CRED = '\33[91m'
+        CGREEN = '\33[32m'
+        CEND = '\33[0m'
+
+        if diff_norm >= 6:
+            print(CGREEN + "Vermutlich Auto" + CEND)
+        else:
+            print(CRED + "Vermutlich kein Auto" + CEND)
+
+working_directory = '2022-04-28-track3/camera_0_subset_1'
 image_type = 'png'
 
 # Scrape directory for files of predefined type
@@ -94,7 +110,7 @@ image_path_list = [os.path.join(working_directory, image_name) for image_name in
 
 
 
-detection_frame = pd.read_feather(os.path.join('2022-04-28-track3/camera_0_subset', 'camera_0.feather'))
+detection_frame = pd.read_feather(os.path.join('2022-04-28-track3/camera_0_subset_1', 'camera_0.feather'))
 
 
 
@@ -125,12 +141,12 @@ for image_name in directory_content[1:]:
     hsv = draw_boxes(hsv, detection_subframe)
 
     # Print average motion inside vs outside of detection box
-    print_average_vector(mag, ang, detection_subframe)
+    print_average_vector(flow, detection_subframe)
 
     # Display dense optical flow
-    """bgr = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
+    bgr = cv.cvtColor(hsv, cv.COLOR_HSV2BGR)
     cv.imshow('frame2', bgr)
-    k = cv.waitKey(30) & 0xff"""
+    k = cv.waitKey(30) & 0xff
 
     # Set current secondary frame as next primary frame
     prvs = next
