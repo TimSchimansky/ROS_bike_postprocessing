@@ -14,6 +14,7 @@ import urllib.request
 
 from helper import *
 
+
 class rosbag_reader:
     def __init__(self, bag_file_name):
         """This function is used for initialization"""
