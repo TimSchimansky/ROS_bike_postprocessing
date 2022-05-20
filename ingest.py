@@ -1,6 +1,6 @@
 import numpy as np
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import warnings
 import pandas as pd
 import geopandas as gpd
@@ -9,6 +9,8 @@ import cv2
 import json
 from io import StringIO
 from hesai_pandar_64_packets import *
+import yaml
+import urllib.request
 
 from helper import *
 
@@ -37,6 +39,12 @@ class rosbag_reader:
             self.overview = dict()
             self.overview['working_directory'] = self.bag_unpack_dir
 
+            # Create dict for sensor meta data as entry in overview dict
+            self.overview['sensor_streams'] = dict()
+
+            # Add general meta from ros bag
+            self.get_ros_bag_meta()
+
     def __enter__(self):
         """This function is used for the (with .. as ..) call"""
         return self
@@ -49,7 +57,44 @@ class rosbag_reader:
         with open(self.overview_file_name, 'w') as f:
             json.dump(self.overview, f, indent=4)
 
-    def export_images(self, topic, sensor_name='camera_0', sampling_step=1):
+    def get_ros_bag_meta(self):
+        # Extract info from bag file
+        info_dict = yaml.safe_load(self.source_bag._get_yaml_info())
+
+        # Save data into overview
+        self.overview['general_meta'] = dict()
+        self.overview['general_meta']['total_message_count'] = info_dict['messages']
+        self.overview['general_meta']['original_path'] = info_dict['path']
+        self.overview['general_meta']['start_time_unix'] = info_dict['start']
+        self.overview['general_meta']['end_time_unix'] = info_dict['end']
+        self.overview['general_meta']['version'] = info_dict['version']
+        self.overview['general_meta']['is_indexed'] = info_dict['indexed']
+
+    def get_weather_for_trajectory(self, geo_dataframe):
+        # Calculate center of dataframe
+        center_lon_string = str(np.mean((geo_dataframe.total_bounds[0], geo_dataframe.total_bounds[2])))
+        center_lat_string = str(np.mean((geo_dataframe.total_bounds[1], geo_dataframe.total_bounds[3])))
+
+        # Get date
+        trajectory_date_string = datetime.utcfromtimestamp(self.overview['general_meta']['start_time_unix']).strftime('%Y-%m-%d')
+
+        # Assemble request url
+        brightsky_url = f'https://api.brightsky.dev/weather?lat={center_lat_string}&lon={center_lon_string}&date={trajectory_date_string}'
+
+        # Get data through brightsky api
+        with urllib.request.urlopen(brightsky_url) as api_handler:
+            brightsky_data = json.loads(api_handler.read().decode())
+
+        # Keep weather info for time of interest (WORKS ONLY WITH SUMMERTIME LIKE THIS!)
+        start_datetime = datetime.utcfromtimestamp(self.overview['general_meta']['start_time_unix']) + timedelta(hours=2)
+        end_datetime = datetime.utcfromtimestamp(self.overview['general_meta']['end_time_unix']) + timedelta(hours=2)
+        self.overview['weather'] = dict()
+        self.overview['weather']['hourly'] = brightsky_data['weather'][start_datetime.hour:end_datetime.hour + 2]
+
+        # Save station info
+        self.overview['weather']['stations'] = brightsky_data['sources']
+
+    def export_images(self, topic, sensor_name='camera_0', sampling_step=1, pretty_print=None):
         topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic)
 
         # Break if already exported and in overview
@@ -76,9 +121,9 @@ class rosbag_reader:
             cv2.imwrite(os.path.join(export_directory, image_file_name), temp_image)
 
         # Add to list of exported data
-        self.add_to_meta_data(camera_unpack_subdir, topic_meta.topics[topic].msg_type, topic, topic_meta.topics[topic].frequency, topic_meta.topics[topic].message_count, is_in_folder=True)
+        self.add_to_meta_data(camera_unpack_subdir, topic_meta.topics[topic].msg_type, topic, topic_meta.topics[topic].frequency, topic_meta.topics[topic].message_count, pretty_print, is_in_folder=True)
 
-    def export_pointclouds(self, topic, sensor_name='lidar_0'):
+    def export_pointclouds(self, topic, sensor_name='lidar_0', pretty_print='Hesai Pandar64'):
         topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic)
 
         # Prepare export folder if not existing
@@ -127,7 +172,7 @@ class rosbag_reader:
             print('Duration: {}'.format(end_time - start_time))
 
         # Add to list of exported data
-        self.add_to_meta_data(lidar_unpack_subdir, topic_meta.topics[topic].msg_type, topic, topic_meta.topics[topic].frequency, topic_meta.topics[topic].message_count, is_in_folder=True)
+        self.add_to_meta_data(lidar_unpack_subdir, topic_meta.topics[topic].msg_type, topic, topic_meta.topics[topic].frequency, topic_meta.topics[topic].message_count, pretty_print, is_in_folder=True)
 
     def raw_hesai_to_cartesian(self, packet_data):
         # Create data transfer object from binary UDP package
@@ -165,7 +210,7 @@ class rosbag_reader:
 
             return np.vstack((x_array,y_array,z_array)).T, np.expand_dims(reflectance_array[valid_value_mask], axis=1)
 
-    def export_1d_data(self, topic_filter, sensor_name=None):
+    def export_1d_data(self, topic_filter, sensor_name=None, pretty_print=None):
         """Function to export data from topics that deliver 1 dimensional data"""
 
         # Throw warning if topic does not exist ant skip
@@ -318,24 +363,28 @@ class rosbag_reader:
 
             dataframe.to_feather(export_filename)
 
+            # Add weather info to overview
+            self.get_weather_for_trajectory(dataframe)
+
         else:
             # TODO: throw exception
             warnings.warn('The topic ' + topic_filter + ' is not available in this bag file!')
             pass
 
         # Add to list of exported data
-        self.add_to_meta_data(export_filename, message_type, topic_filter, topic_meta.topics[topic_filter].frequency, topic_meta.topics[topic_filter].message_count, is_geo=is_geo)
+        self.add_to_meta_data(export_filename, message_type, topic_filter, topic_meta.topics[topic_filter].frequency, topic_meta.topics[topic_filter].message_count, pretty_print, is_geo=is_geo)
 
-    def add_to_meta_data(self, export_filepath, message_type, topic_name, frequency, message_count, is_in_folder=False, is_geo=False):
+    def add_to_meta_data(self, export_filepath, message_type, topic_name, frequency, message_count, pretty_print, is_in_folder=False, is_geo=False):
         # Split path, filename and suffix
         export_filename = os.path.basename(export_filepath)
         export_filename_pure = export_filename.split('.')[0]
 
         # Add to list of exported data
-        self.overview[export_filename_pure] = dict()
-        self.overview[export_filename_pure]['message_type'] = message_type
-        self.overview[export_filename_pure]['topic_name'] = topic_name
-        self.overview[export_filename_pure]['frequency'] = frequency
-        self.overview[export_filename_pure]['message_count'] = message_count
-        self.overview[export_filename_pure]['is_in_folder'] = is_in_folder
-        self.overview[export_filename_pure]['is_geo'] = is_geo
+        self.overview['sensor_streams'][export_filename_pure] = dict()
+        self.overview['sensor_streams'][export_filename_pure]['message_type'] = message_type
+        self.overview['sensor_streams'][export_filename_pure]['topic_name'] = topic_name
+        self.overview['sensor_streams'][export_filename_pure]['frequency'] = frequency
+        self.overview['sensor_streams'][export_filename_pure]['message_count'] = message_count
+        self.overview['sensor_streams'][export_filename_pure]['is_in_folder'] = is_in_folder
+        self.overview['sensor_streams'][export_filename_pure]['is_geo'] = is_geo
+        self.overview['sensor_streams'][export_filename_pure]['pretty_print'] = pretty_print

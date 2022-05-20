@@ -45,10 +45,10 @@ class data_as_pandas:
             self.overview = json.loads(f.read())
 
         # remove working directory entry
-        self.overview.pop('working_directory')
+        self.working_directory_original = self.overview['working_directory']
 
         # Create sensor list
-        self.sensor_list = list(self.overview.keys())
+        self.sensor_list = self.overview['sensor_streams']
 
         # Create empty dict for pandas dataframes
         self.dataframes = dict()
@@ -57,7 +57,7 @@ class data_as_pandas:
         # TODO: implement exclude option
 
         # Iterate over available files
-        for key, value in self.overview.items():
+        for key, value in self.sensor_list.items():
             # Check if folder or 1d data
             if value['is_in_folder']:
                 # Case of image data
@@ -164,18 +164,18 @@ with rosbag_reader("../2022-04-28-track3.bag") as reader_object:
     #reader_object.export_1d_data('/note9/android/magnetic_field', sensor_name='magnetic_field_sensor_0')
     #reader_object.export_1d_data('/phone1/android/illuminance', sensor_name='illuminance_sensor_0')
     #reader_object.export_1d_data('/phone1/android/imu', sensor_name='inertial_measurement_unit_0')
-    #reader_object.export_1d_data('/note9/android/barometric_pressure', sensor_name='pressure_sensor_0')
-    #reader_object.export_1d_data('/side_distance', sensor_name='left_range_sensor_0')
-    #reader_object.export_1d_data('/note9/android/fix', sensor_name='gnss_0')
-    reader_object.export_images('/side_view/image_raw/compressed', sensor_name='camera_0', sampling_step=1)
+    reader_object.export_1d_data('/note9/android/barometric_pressure', sensor_name='pressure_sensor_0' ,pretty_print='Barometer Note9')
+    reader_object.export_1d_data('/side_distance', sensor_name='left_range_sensor_0' ,pretty_print='Abstandssensor links')
+    reader_object.export_1d_data('/note9/android/fix', sensor_name='gnss_0' ,pretty_print='GNSS Note9')
+    #reader_object.export_images('/side_view/image_raw/compressed', sensor_name='camera_0', sampling_step=1)
 
 # TODO: Add pretty print to json
 # TODO: Add ignore_json to export althoug existent
 
-"""bag_pandas = data_as_pandas('2022-04-28-track3')
+bag_pandas = data_as_pandas('2022-04-28-track3')
 bag_pandas.load_from_working_directory()
 print(1)
-
+"""
 #timeline_plotting.create_timeline_plot(bag_pandas, ['pressure_sensor_0', 'magnetic_field_sensor_0', 'magnetic_field_sensor_0', 'magnetic_field_sensor_0', 'left_range_sensor_0', 'camera_0', 'interpretation/manual_ground_truth'], ['fluid_pressure', 'x', 'y', 'z','range_cm', 'overlap', 'vehicle_encounter'])
 #timeline_plotting.create_timeline_plot(bag_pandas, ['left_range_sensor_0'], ['range_cm'])
 # ---- Testing below --------------------------------------------
