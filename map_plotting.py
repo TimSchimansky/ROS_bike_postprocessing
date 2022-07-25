@@ -129,12 +129,9 @@ def format_ticks_deg(ax, bounding_box):
     return ax
 
 
-def create_map_plot(trajectory_df, secondary_data_df, secondary_data_key, tertiary_data_df=None, tertiary_data_key=None, destination_width=500):
+def create_map_plot(trajectory_df, secondary_data_df, secondary_data_key, destination_width=500):
     # If no tertiary data given, replace with constant
-    if tertiary_data_df.empty:
-        plot_sizes = 2
-    else:
-        plot_sizes = ((tertiary_data_df[tertiary_data_key]-min(tertiary_data_df[tertiary_data_key]))**4)/100000000
+    plot_sizes = 2
 
     # Apply the default theme
     sns.set_theme()

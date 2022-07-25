@@ -1,0 +1,8 @@
+sens_type, topic_name, sensor_name, pretty_print, subsampling
+'1d', '/note9/android/magnetic_field', 'magnetic_field_sensor_0', 'Magnetometer Note 9', None
+'1d', '/note9/android/illuminance', 'illuminance_sensor_0', 'Beleuchtungssensor Note 9', None
+'1d', '/note9/android/imu', 'inertial_measurement_unit_0', 'IMU Note 9', None
+'1d', '/note9/android/barometric_pressure', 'pressure_sensor_0', 'Barometer Note 9', None
+'1d', '/note9/android/fix', 'gnss_0', 'GNSS Note 9', None
+'1d', '/side_distance', 'left_range_sensor_0', 'Abstandssensor links', None
+'im', '/side_view/image_raw/compressed', 'camera_0', 'Kamera seitlich links', 1

@@ -16,13 +16,17 @@ from helper import *
 
 
 class rosbag_reader:
-    def __init__(self, bag_file_name):
+    def __init__(self, bag_file_name, bag_unpack_base_dir):
         """This function is used for initialization"""
         self.source_bag = rosbag.Bag(bag_file_name, 'r')
         self.topics = self.source_bag.get_type_and_topic_info()[1].keys()
 
         # Prepare export folder if not existing
-        self.bag_unpack_dir = os.path.splitext(os.path.basename(bag_file_name))[0]
+        if bag_unpack_base_dir:
+            self.bag_unpack_dir = os.path.join(bag_unpack_base_dir, os.path.splitext(os.path.basename(bag_file_name))[0])
+        else:
+            self.bag_unpack_dir = os.path.splitext(os.path.basename(bag_file_name))[0]
+
         if not os.path.exists(self.bag_unpack_dir):
             os.makedirs(self.bag_unpack_dir)
 
@@ -94,6 +98,22 @@ class rosbag_reader:
 
         # Save station info
         self.overview['weather']['stations'] = brightsky_data['sources']
+
+    def export_flex(self, sens_type, topic_name, sensor_name, pretty_print, subsampling):
+        """Easy call for export function:
+        'pc' : runs export_pointcloud()
+        'im' : runs export_image()
+        '1d' : runs export_1d_data()"""
+
+        if sens_type == 'pc':
+            self.export_pointclouds(topic_name, sensor_name, pretty_print)
+        elif sens_type == 'im':
+            self.export_images(topic_name, sensor_name, subsampling, pretty_print)
+        elif sens_type == '1d':
+            self.export_1d_data(topic_name,sensor_name, pretty_print)
+        else:
+            pass
+            # TODO: Throw error
 
     def export_images(self, topic, sensor_name='camera_0', sampling_step=1, pretty_print=None):
         topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic)

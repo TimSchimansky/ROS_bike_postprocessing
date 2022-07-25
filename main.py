@@ -206,9 +206,8 @@ width_pre = width.reindex(index=mixed_index).interpolate().reindex(dist.index)
 print(0)
 
 # TODO: TEMPORÄR FILTEr ------------------------------------------------------------------------
-#pre.loc[(pre.range_cm >= 150), 'range_cm'] = np.nan
+dist.loc[(dist.range_cm >= 150), 'range_cm'] = np.nan
 
 # Plot as map
-map_plotting.create_map_plot(nav_pre, dist, 'range_cm', tertiary_data_df=width_pre, tertiary_data_key='overlap', destination_width=200)
+map_plotting.create_map_plot(nav_pre, dist, 'range_cm', destination_width=200)
 
-"""

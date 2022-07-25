@@ -33,7 +33,7 @@ for layer in catalog_style['layers']:
     print('-------------------------------------------------------------------------------------------------------')
 print(1)"""
 
-import os
+"""import os
 from qgis.core import *
 from PyQt5 import *
 from PyQt5.QtSvg import *
@@ -61,4 +61,23 @@ def finished():
     print("saved")
 
 render.finished.connect(finished)
-render.start()
+render.start()"""
+
+
+import torch
+
+# Model
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+
+# Images
+imgs = ['2022-04-28-track2/camera_0/1651150867.434997689.png']  # batch of images
+
+# Inference
+results = model(imgs)
+
+# Results
+results.print()
+results.save()  # or .show()
+
+results.xyxy[0]  # img1 predictions (tensor)
+print(results.pandas().xyxy[0])  # img1 predictions (pandas)
