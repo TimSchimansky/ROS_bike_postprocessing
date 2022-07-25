@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import warnings
 from datetime import datetime, timedelta
 import warnings
 import pandas as pd
@@ -108,7 +109,7 @@ class rosbag_reader:
         if sens_type == 'pc':
             self.export_pointclouds(topic_name, sensor_name, pretty_print)
         elif sens_type == 'im':
-            self.export_images(topic_name, sensor_name, subsampling, pretty_print)
+            self.export_images(topic_name, sensor_name, int(subsampling), pretty_print)
         elif sens_type == '1d':
             self.export_1d_data(topic_name,sensor_name, pretty_print)
         else:
@@ -119,9 +120,12 @@ class rosbag_reader:
         topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic)
 
         # Break if already exported and in overview
-        if sensor_name in self.overview.keys():
+        if sensor_name in self.overview['sensor_streams'].keys():
             print(sensor_name + ' was already exported')
             return
+
+        # Debug output
+        print('DEBUG: Eporting topic: ' + topic + ' with type sensor_msgs/Image Message')
 
         # Prepare export folder if not existing
         camera_unpack_subdir = sensor_name
@@ -145,6 +149,14 @@ class rosbag_reader:
         self.add_to_meta_data(camera_unpack_subdir, topic_meta.topics[topic].msg_type, topic, topic_meta.topics[topic].frequency, topic_meta.topics[topic].message_count, pretty_print, is_in_folder=True)
 
     def export_pointclouds(self, topic, sensor_name='lidar_0', pretty_print='Hesai Pandar64'):
+        # Break if already exported and in overview
+        if sensor_name in self.overview['sensor_streams'].keys():
+            print(sensor_name + ' was already exported')
+            return
+
+        # Debug output
+        print('DEBUG: Eporting topic: ' + topic + ' with type msg/PandarPacket')
+
         topic_meta = self.source_bag.get_type_and_topic_info(topic_filters=topic)
 
         # Prepare export folder if not existing
@@ -240,7 +252,7 @@ class rosbag_reader:
             return
 
         # Break if already exported and in overview
-        if sensor_name in self.overview.keys():
+        if sensor_name in self.overview['sensor_streams'].keys():
             print(sensor_name + ' was already exported')
             return
 
@@ -252,7 +264,7 @@ class rosbag_reader:
         is_geo = False
 
         # Debug output
-        print('DEBUG: message type of topic: ' + topic_filter + ' is: ' + message_type)
+        print('DEBUG: Eporting topic: ' + topic_filter + ' with type ' + message_type)
 
         # Handle file export for barometric pressure data
         if message_type == 'sensor_msgs/FluidPressure':
@@ -342,16 +354,10 @@ class rosbag_reader:
 
             # Create empty list for appension
             dataframe_as_list = []
-            last_range_valid = True
 
             for topic, msg, t in self.source_bag.read_messages(topics=[topic_filter]):
                 # Assemble line output by conversion of message into list
-                if msg.range <= msg.max_range:
-                    dataframe_as_list.append([msg.header.stamp.to_sec(), t.to_sec(), msg.range])
-                    last_range_valid = True
-                elif last_range_valid == True:
-                    dataframe_as_list.append([msg.header.stamp.to_sec(), t.to_sec(), np.nan])
-                    last_range_valid = False
+                dataframe_as_list.append([msg.header.stamp.to_sec(), t.to_sec(), msg.range])
 
             # Save as pandas dataframe in feather file
             dataframe = pd.DataFrame(dataframe_as_list, columns=['timestamp_sensor', 'timestamp_bagfile', 'range_cm'])
@@ -382,7 +388,8 @@ class rosbag_reader:
             dataframe = gpd.GeoDataFrame(dataframe, geometry=gpd.points_from_xy(dataframe.lon, dataframe.lat))
             dataframe.set_crs(epsg=4326, inplace=True)
 
-            dataframe.to_feather(export_filename)
+            with warnings.catch_warnings():
+                dataframe.to_feather(export_filename)
 
             # Add weather info to overview
             self.get_weather_for_trajectory(dataframe)
