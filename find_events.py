@@ -3,6 +3,9 @@ from itertools import compress
 
 # Installed
 import pandas as pd
+from scipy import ndimage
+import numpy as np
+import matplotlib as plt
 
 # Own
 from ingest import *
@@ -23,9 +26,9 @@ class DataframeWithMeta:
         self.orig_file_type = '.feather'
 
 class VehicleEncounter:
-    def __init__(self, bag_directory, time_span):
+    def __init__(self, bag_directory, time_span, time_multiplicator=3):
         # Set unpacked bag path
-        self.bag_directory = bag_directory
+        self.bag_directory = bag_directory[:-4]
 
         # Set Flags
         self.is_confirmed = False
@@ -40,6 +43,10 @@ class VehicleEncounter:
         # Generate side image list
         self.image_list = self.generate_image_list()
 
+        # Elongate the duration of the event by this factor since ultrasonic sensor only senses the center of the frame
+        # but vehicles can be seen for longer time in images
+        self.time_multiplicator = time_multiplicator
+
     def generate_image_list(self, camera_sub_directory='camera_0'):
         # Get list of all files in bagfile camera direcory
         image_file_list = os.listdir(os.path.join(self.bag_directory, camera_sub_directory))
@@ -48,6 +55,7 @@ class VehicleEncounter:
         image_time_list = np.array([float('.'.join(file_name.split('.')[:-1])) for file_name in image_file_list])
 
         # Get period of interest
+        # TODO: Fix error
         boolean_list = list(np.logical_and((image_time_list>=self.encounter_begin), (image_time_list<=self.encounter_end)))
 
         # Get image names in period of interest
@@ -122,7 +130,44 @@ def traverse_bag_vehicle_encounters(bagfile_directory, encounter_max_dist, bagfi
 
     side_dist['range_cm'].values[side_dist['range_cm'].values > 1000] = np.NAN
 
-    side_dist['threshold_true'].values[side_dist['range_cm'].values > 300] = False
+    # TODO: Threshold as parameter
+    side_dist['below_threshold'] = False
+    side_dist['below_threshold'].values[side_dist['range_cm'].values < 250] = True
+
+    # Morphological opening to remove noise
+    side_dist['below_threshold_filtered'] = ndimage.binary_erosion(ndimage.binary_dilation(np.array(side_dist['below_threshold']), iterations=10), iterations=10)
+
+    # Detect rising and falling edges
+    diff_edges = np.diff(side_dist['below_threshold_filtered'].astype(np.int8))
+
+    # Get indicees of edges and shift rising edge by one to get index of first true entry
+    ind_rise_edge = np.where(diff_edges == 1)[0] + 1
+    ind_fall_edge = np.where(diff_edges == -1)[0]
+
+    # Check if indicees for rising and falling are equal:
+    if len(ind_rise_edge) != len(ind_fall_edge):
+        # TODO: Save the situation
+        print("Warning: Amount of edges not equal!! Handling not yet implemented")
+
+    # Check if index of first rising edge is smaller than first falling edge
+    if ind_rise_edge[0] >= ind_fall_edge[0]:
+        # TODO: Save the situation
+        print("Warning: falling edge before rising edge!! Handling not yet implemented")
+
+    # Create empty list of encounters
+    vehicle_encounter_list = []
+
+    # Iterate over pair of indicees
+    for begin_index, end_index in zip(ind_rise_edge, ind_fall_edge):
+        # Get timestamps for begin and end index
+        begin_timestamp = side_dist.iloc[[begin_index]].index
+        end_timestamp = side_dist.iloc[[end_index]].index
+
+        # Append event to list
+        vehicle_encounter_list.append(VehicleEncounter(bagfile_directory, (begin_timestamp, end_timestamp)))
+
+
+        print(1)
 
     # TODO: Help
 
