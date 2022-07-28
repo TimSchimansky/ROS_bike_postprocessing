@@ -9,6 +9,7 @@ import matplotlib as plt
 
 # Own
 from ingest import *
+import detect_cars
 
 class DataframeWithMeta:
     def __init__(self, dataframe, meta, orig_file_name):
@@ -36,9 +37,13 @@ class VehicleEncounter:
         # Set moving direction (-1:undetermined, 0:overtake, 1:opposing)
         self.movement_direction = -1
 
-        # Write time span to class
-        self.encounter_begin = time_span[0]
-        self.encounter_end = time_span[1]
+        # Write time span to class and enlarge by factor
+        self.encounter_begin = (time_span[0].astype(int) / 10**9)[0]
+        self.encounter_end = (time_span[1].astype(int) / 10**9)[0]
+        encounter_duration = self.encounter_end - self.encounter_begin
+        single_buffer_only = (time_multiplicator - 1) / 2 * encounter_duration
+        self.encounter_begin -= single_buffer_only
+        self.encounter_end += single_buffer_only
 
         # Generate side image list
         self.image_list = self.generate_image_list()
@@ -50,13 +55,14 @@ class VehicleEncounter:
     def generate_image_list(self, camera_sub_directory='camera_0'):
         # Get list of all files in bagfile camera direcory
         image_file_list = os.listdir(os.path.join(self.bag_directory, camera_sub_directory))
+        image_file_list.sort()
 
         # Generate List of floats from filenames
         image_time_list = np.array([float('.'.join(file_name.split('.')[:-1])) for file_name in image_file_list])
 
         # Get period of interest
         # TODO: Fix error
-        boolean_list = list(np.logical_and((image_time_list>=self.encounter_begin), (image_time_list<=self.encounter_end)))
+        boolean_list = list(np.logical_and((image_time_list >= self.encounter_begin), (image_time_list <= self.encounter_end)))
 
         # Get image names in period of interest
         image_file_list_crop = list(compress(image_file_list, boolean_list))
@@ -64,8 +70,9 @@ class VehicleEncounter:
         # Return full path for each frame
         return [os.path.join(self.bag_directory, camera_sub_directory, file_name) for file_name in image_file_list_crop]
 
-    def analyse_encounter(self):
+    def verify_encounter(self):
         # Run YOLO5
+        #detect_cars.CarDetector()
 
         # Run Raft
 
@@ -166,10 +173,8 @@ def traverse_bag_vehicle_encounters(bagfile_directory, encounter_max_dist, bagfi
         # Append event to list
         vehicle_encounter_list.append(VehicleEncounter(bagfile_directory, (begin_timestamp, end_timestamp)))
 
-
-        print(1)
-
-    # TODO: Help
+    # Return list of vehicle encounters
+    return vehicle_encounter_list
 
 if __name__ == "__main__":
     # Set bagfile path
@@ -203,10 +208,8 @@ if __name__ == "__main__":
         bagfile_pandas.load_from_working_directory()
 
         # Go though trajectory for events with potential vehicle encounters
-        traverse_bag_vehicle_encounters(bagfile_path, encounter_max_dist, bagfile_pandas)
+        encounter_list = traverse_bag_vehicle_encounters(bagfile_path, encounter_max_dist, bagfile_pandas)
 
-    # Repeat for all trajecories
-    print(1)
-
-
-    # TODO: Do Classification for TOI
+        # Verify TOIs as real encounters
+        for encounter in encounter_list:
+            encounter.verify_encounter()

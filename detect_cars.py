@@ -3,19 +3,26 @@ import torch
 import pandas as pd
 
 class CarDetector:
-    def __init__(self, image_sequence_path, image_type='.png'):
+    def __init__(self, image_sequence, image_type='.png'):
         # Classes the detector should look for
         self.classes_of_interest_list = ['car', 'truck', 'bus', 'train', 'motorcycle', 'bicycle', 'person']
 
-        # Set working directory
-        self.working_directory = image_sequence_path
+        # Switch cases between given folder or file list
+        self.folder_mode = False
+        if isinstance(image_sequence, list):
+            self.image_path_list = image_sequence
+        else:
+            self.folder_mode = True
 
-        # Scrape directory for files of predefined type
-        directory_content = []
-        for file in sorted(os.listdir(self.working_directory)):
-            if file.endswith(image_type):
-                directory_content.append(file)
-        self.image_path_list = [os.path.join(self.working_directory, image_name) for image_name in directory_content]  # batch of images
+            # Set working directory
+            self.working_directory = image_sequence
+
+            # Scrape directory for files of predefined type
+            directory_content = []
+            for file in sorted(os.listdir(self.working_directory)):
+                if file.endswith(image_type):
+                    directory_content.append(file)
+            self.image_path_list = [os.path.join(self.working_directory, image_name) for image_name in directory_content]  # batch of images
 
         # Download pretrained yolo5 model
         self.model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
@@ -34,8 +41,11 @@ class CarDetector:
         # Concatente results
         self.concatenated_results = pd.concat(self.results_frame_list, ignore_index=True, axis=0)
 
-        # Export as feather file
-        self.concatenated_results.to_feather(os.path.join(self.working_directory, 'camera_0.feather'))
+        if self.folder_mode:
+            # Export as feather file
+            self.concatenated_results.to_feather(os.path.join(self.working_directory, 'camera_0.feather'))
+        else:
+            return self.concatenated_results
 
     def batch_detection(self, sub_image_path_list):
         # Start detection on batch
