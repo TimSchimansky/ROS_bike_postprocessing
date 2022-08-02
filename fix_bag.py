@@ -185,6 +185,16 @@ def fix_bagfile_header(par_inbag, par_outbag, par_callerid=None, par_mappings=[]
     print ("\ndone")
     print ("\nThe new bag probably needs to be re-indexed. Use 'rosbag reindex {}' for that.\n".format(outbag.filename))
 
+def replace_with_fixed(in_bag):
+    # Create tmp name for fixed bab
+    tmp_out_bag = in_bag + '_fixed_tmp'
+
+    # Run fix bag
+    fix_bagfile_header(in_bag, tmp_out_bag)
+
+    # Delete defective bag and replace with fixed
+    os.remove(in_bag)
+    os.rename(tmp_out_bag, in_bag)
 
 """if __name__ == '__main__':
     main()"""

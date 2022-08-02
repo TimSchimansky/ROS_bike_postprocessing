@@ -25,23 +25,31 @@ FLOW_IMG_HEIGHT = 360
 CAMERA_OPENING_ANGLE_DEG = 170
 
 class FlowDetector:
-    def __init__(self, image_sequence_path, measured_distance, measured_speed, image_type='.png'):
-        # Set working directory
-        self.working_directory = image_sequence_path
+    def __init__(self, image_sequence, measured_distance, measured_speed, image_type='.png', standalone_mode=True, yolo_bounding_boxes=None):
+        if standalone_mode:
+            # Set working directory
+            self.working_directory = image_sequence
 
-        # Save measured data for paralax threshold calculation
-        self.obj_distance = measured_distance
-        self.bike_speed = measured_speed
+            # Scrape directory for files of predefined type
+            directory_content = []
+            for file in sorted(os.listdir(self.working_directory)):
+                if file.endswith(image_type):
+                    directory_content.append(file)
+            self.image_path_list = [os.path.join(self.working_directory, image_name) for image_name in directory_content]  # batch of images
 
-        # Scrape directory for files of predefined type
-        directory_content = []
-        for file in sorted(os.listdir(self.working_directory)):
-            if file.endswith(image_type):
-                directory_content.append(file)
-        self.image_path_list = [os.path.join(self.working_directory, image_name) for image_name in directory_content]  # batch of images
+            # Get feather file of detections from same folder
+            self.yolo_bounding_boxes = pd.read_feather(os.path.join(image_sequence, 'camera_0.feather'))
 
-        # Get feather file of detections from same folder
-        self.yolo_bounding_boxes = pd.read_feather(os.path.join(image_sequence_path, 'camera_0.feather'))
+        elif not standalone_mode and yolo_bounding_boxes is not None:
+            # Save list of image paths for later use
+            self.image_path_list = image_sequence
+
+            # Save bounding boxes for later use
+            self.yolo_bounding_boxes = yolo_bounding_boxes
+
+        else:
+            pass
+            # TODO: Throw exception
 
         # Get dimensions of images
         self.input_img_height, self.input_img_width = imageio.imread(self.image_path_list[0]).shape[:-1]
@@ -53,6 +61,10 @@ class FlowDetector:
 
         # If you can, run this example on a GPU, it will be a lot faster.
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+
+        # Save measured data for paralax threshold calculation
+        self.obj_distance = measured_distance
+        self.bike_speed = measured_speed
 
         # Setup model
         self.model = raft_large(pretrained=True, progress=False).to(self.device)

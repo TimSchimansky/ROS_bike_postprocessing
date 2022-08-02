@@ -1,5 +1,6 @@
 # Native
 from itertools import compress
+import copy
 
 # Installed
 import pandas as pd
@@ -9,6 +10,7 @@ import matplotlib as plt
 
 # Own
 from ingest import *
+from helper import *
 import detect_cars
 
 class DataframeWithMeta:
@@ -27,9 +29,12 @@ class DataframeWithMeta:
         self.orig_file_type = '.feather'
 
 class VehicleEncounter:
-    def __init__(self, bag_directory, time_span, time_multiplicator=3):
+    def __init__(self, bag_directory, time_span, cropped_bagfile_pandas, time_multiplicator=3):
         # Set unpacked bag path
-        self.bag_directory = bag_directory[:-4]
+        self.bag_directory = bag_directory
+
+        # Load cropped bagfile as pandas into self
+        self.cropped_bagfile_pandas = cropped_bagfile_pandas
 
         # Set Flags
         self.is_confirmed = False
@@ -37,13 +42,8 @@ class VehicleEncounter:
         # Set moving direction (-1:undetermined, 0:overtake, 1:opposing)
         self.movement_direction = -1
 
-        # Write time span to class and enlarge by factor
-        self.encounter_begin = (time_span[0].astype(int) / 10**9)[0]
-        self.encounter_end = (time_span[1].astype(int) / 10**9)[0]
-        encounter_duration = self.encounter_end - self.encounter_begin
-        single_buffer_only = (time_multiplicator - 1) / 2 * encounter_duration
-        self.encounter_begin -= single_buffer_only
-        self.encounter_end += single_buffer_only
+        # Write time span to class and enlarge by factor (external helper function)
+        self.encounter_begin, self.encounter_end = extend_timespan_with_factor(time_span, time_multiplicator)
 
         # Generate side image list
         self.image_list = self.generate_image_list()
@@ -70,9 +70,22 @@ class VehicleEncounter:
         # Return full path for each frame
         return [os.path.join(self.bag_directory, camera_sub_directory, file_name) for file_name in image_file_list_crop]
 
+    def calc_meta_info(self):
+        # Filter invalid measurements
+        self.cropped_bagfile_pandas.dataframes['left_range_sensor_0'].dataframe['range_cm'].values[
+            self.cropped_bagfile_pandas.dataframes['left_range_sensor_0'].dataframe['range_cm'].values > 1000] = np.NAN
+
+        # Calculate average range measurement
+        self.mean_distance = self.cropped_bagfile_pandas.dataframes['left_range_sensor_0'].dataframe['range_cm'].mean()
+
+        # Calculate average speed
+
+        pass
+
     def verify_encounter(self):
         # Run YOLO5
-        #detect_cars.CarDetector()
+        self.yolo5 = detect_cars.CarDetector(self.image_list)
+        self.yolo5_results = self.yolo5.manage_detection()
 
         # Run Raft
 
@@ -130,16 +143,37 @@ class DataAsPandas:
                 self.dataframes[key].dataframe['timestamp_bagfile'] = pd.to_datetime(self.dataframes[key].dataframe['timestamp_bagfile'], unit='s')
                 self.dataframes[key].dataframe.set_index('timestamp_bagfile', inplace=True)
 
+    def get_trimmed_copy(self, time_span, time_multiplicator):
+        # Calc time span
+        trim_begin, trim_end = extend_timespan_with_factor(time_span, time_multiplicator)
+
+        # Copy self for trimming
+        copy_of_self = copy.deepcopy(self)
+
+        # Set boundaries for trim in copy
+        copy_of_self.overview['general_meta']['start_time_unix'] = trim_begin
+        copy_of_self.overview['general_meta']['end_time_unix'] = trim_end
+
+        # Do the trimming and return
+        copy_of_self.trim_to_set_period()
+        return copy_of_self
+
+    def trim_to_set_period(self):
+        # Iterate over timeseries for trimming
+        for sensor in self.dataframes.keys():
+            self.dataframes[sensor].dataframe = self.dataframes[sensor].dataframe.truncate(before=pd.to_datetime(self.overview['general_meta']['start_time_unix'],unit='s'), after=pd.to_datetime(self.overview['general_meta']['end_time_unix'],unit='s'))
+
 def traverse_bag_vehicle_encounters(bagfile_directory, encounter_max_dist, bagfile_pandas):
     """To look for moments in the data where a vehicle encounter is propable, the side distance sensor is checked for being under a certain value"""
-    # TODO: Detect blocks of close distance and return
-    side_dist = bagfile_pandas.dataframes['left_range_sensor_0'].dataframe
+    # load side distance into temp var
+    side_dist = bagfile_pandas.dataframes['left_range_sensor_0'].dataframe.copy()
 
+    # Filter out ranges over 10m
     side_dist['range_cm'].values[side_dist['range_cm'].values > 1000] = np.NAN
 
-    # TODO: Threshold as parameter
+    # Use parameter threshold to filter for unusual close encounters
     side_dist['below_threshold'] = False
-    side_dist['below_threshold'].values[side_dist['range_cm'].values < 250] = True
+    side_dist['below_threshold'].values[side_dist['range_cm'].values < encounter_max_dist] = True
 
     # Morphological opening to remove noise
     side_dist['below_threshold_filtered'] = ndimage.binary_erosion(ndimage.binary_dilation(np.array(side_dist['below_threshold']), iterations=10), iterations=10)
@@ -170,41 +204,34 @@ def traverse_bag_vehicle_encounters(bagfile_directory, encounter_max_dist, bagfi
         begin_timestamp = side_dist.iloc[[begin_index]].index
         end_timestamp = side_dist.iloc[[end_index]].index
 
+        # Get trimmed version of data as pandas
+        cropped_bagfile_pandas = bagfile_pandas.get_trimmed_copy((begin_timestamp, end_timestamp), 10)
+
         # Append event to list
-        vehicle_encounter_list.append(VehicleEncounter(bagfile_directory, (begin_timestamp, end_timestamp)))
+        vehicle_encounter_list.append(VehicleEncounter(bagfile_directory, (begin_timestamp, end_timestamp), cropped_bagfile_pandas))
 
     # Return list of vehicle encounters
     return vehicle_encounter_list
 
 if __name__ == "__main__":
-    # Set bagfile path
-    bagfile_directory = "../"
-    bagfiles = ["2022-04-28-track3.bag"]
-    bagfile_paths = [os.path.join(bagfile_directory, bagfile_i) for bagfile_i in bagfiles]
+    # Get df of ingested tracks
+    bagfile_unpack_direcory = "../bagfiles_unpack"
+    bagfile_db_file = "trajectory_db.feather"
+    bagfile_db = pd.read_feather(os.path.join(bagfile_unpack_direcory, bagfile_db_file))
 
-    # Set export directory
-    unpack_direcory = ".."
-
-    # Read config file for sensors to import
-    sensor_export = pd.read_csv('export_sensors_tmp.csv')
+    # Filter out files, that are completely processed
+    bagfile_db = bagfile_db.loc[bagfile_db['processed'] == False]
 
     # Set threshold for encounter indication in cm
     encounter_max_dist = 300
 
-    # Ingest bag files via config file
-    for bagfile_path in bagfile_paths:
-        with rosbag_reader(bagfile_path, unpack_direcory) as reader_object:
-            #print(reader_object.topics)
-
-            # Go through list of sensors to export
-            for _, sensor_line in sensor_export.iterrows():
-                reader_object.export_flex(sensor_line['sens_type'], sensor_line['topic_name'], sensor_line['sensor_name'], sensor_line['pretty_print'], sensor_line['subsampling'])
-
-
     # TODO: Traverse Trajectories(s) for TOIs
-    for bagfile_path in bagfile_paths:
+    for i, bagfile_db_entry in bagfile_db.iterrows():
+        # Get bagfile path
+        bagfile_path = os.path.join(bagfile_db_entry['directory'], bagfile_db_entry['name'][:-4])
+
         # Load into pandas for operations
-        bagfile_pandas = DataAsPandas(bagfile_path[:-4])
+        bagfile_pandas = DataAsPandas(bagfile_path)
         bagfile_pandas.load_from_working_directory()
 
         # Go though trajectory for events with potential vehicle encounters

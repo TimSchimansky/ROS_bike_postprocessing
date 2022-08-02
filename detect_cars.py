@@ -70,8 +70,9 @@ class CarDetector:
             # Remove unwanted entries (e.g. benches) and remove index
             raw_results_frame_list[i] = raw_results_frame_list[i][raw_results_frame_list[i]['name'].isin(self.classes_of_interest_list)].reset_index()
 
-            # Insert unix timestamp from image name and convert to datetime
+            # Insert unix timestamp from image name and convert to datetime as well as unchanged image name
             raw_results_frame_list[i]['timestamp'] = pd.to_datetime(float(frame_name[:-4]), unit='s')
+            raw_results_frame_list[i]['image_name'] = frame_name[:-4]
 
         # Pop empty frames from results frame list
         if len(empty_frames_list) != 0:

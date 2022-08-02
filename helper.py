@@ -40,3 +40,23 @@ def dec_2_dms(decimal):
     minute, second = divmod(decimal*3600, 60)
     degree, minute = divmod(minute, 60)
     return '%d° %d\' %.2f\"' %(degree, minute, second)
+
+def extend_timespan_with_factor(time_span, time_multiplicator):
+    """time_span is expected as tuple. Factor as number"""
+    try:
+        encounter_begin = (time_span[0].astype(int) / 10 ** 9)[0]
+        encounter_end = (time_span[1].astype(int) / 10 ** 9)[0]
+    except:
+        encounter_begin, encounter_end = time_span
+
+    # Calc length
+    encounter_duration = encounter_end - encounter_begin
+
+    # Subtract 1 from multiplicator and halve to archieve symmetrical extension value
+    single_buffer_only = (time_multiplicator - 1) / 2 * encounter_duration
+
+    # Add and subtract from start and end value
+    encounter_begin -= single_buffer_only
+    encounter_end += single_buffer_only
+
+    return encounter_begin, encounter_end

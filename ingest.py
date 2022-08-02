@@ -14,6 +14,7 @@ import yaml
 import urllib.request
 
 from helper import *
+import fix_bag
 
 
 class rosbag_reader:
@@ -419,19 +420,19 @@ class rosbag_reader:
 
 if __name__ == "__main__":
     # Set bagfile path
-    bagfile_source_directory = "../"
+    bagfile_source_directory = "../bagfiles"
     directory_content = os.listdir(bagfile_source_directory)
-    bagfile_source_paths = [os.path.join(bagfile_source_directory, file) for file in directory_content if file[:-3] == 'bag']
+    bagfile_source_paths = [os.path.join(bagfile_source_directory, file) for file in directory_content if file[-3:] == 'bag']
 
     # Set export directory
-    bagfile_unpack_direcory = ".."
+    bagfile_unpack_direcory = "../bagfiles_unpack"
 
     # Name of database feather file
     bagfile_db_file = "trajectory_db.feather"
 
     # Create if none existant
     if not os.path.isfile(os.path.join(bagfile_unpack_direcory, bagfile_db_file)):
-        bagfile_db = pd.DataFrame(columns=['name', 'time_beg', 'time_end', 'processed'])
+        bagfile_db = pd.DataFrame(columns=['name', 'directory', 'time_beg', 'time_end', 'topics', 'processed'])
     else:
         bagfile_db = pd.read_feather(os.path.join(bagfile_unpack_direcory, bagfile_db_file))
 
@@ -439,9 +440,29 @@ if __name__ == "__main__":
     sensor_export = pd.read_csv('export_sensors_tmp.csv')
 
     # Ingest bag files via config file
+    counter = 0
     for bagfile_source_path in bagfile_source_paths:
+        # Fix broken headers
+        #fix_bag.replace_with_fixed(bagfile_source_path)
+
+        # Unpack bag file
         with rosbag_reader(bagfile_source_path, bagfile_unpack_direcory) as reader_object:
-            # print(reader_object.topics)
+            # If not in there add file to db file (list can be used to reingest bagfiles)
+            if (os.path.split(bagfile_source_path)[-1] in bagfile_db.name.values) and (os.path.split(bagfile_source_path)[-1] not in []):
+                print(f"DEBUG: File {os.path.split(bagfile_source_path)[-1]} is already ingested")
+                continue
+            else:
+                print(f"DEBUG: File {os.path.split(bagfile_source_path)[-1]} will now be ingested")
+                tmp_line_df = pd.DataFrame([[os.path.split(bagfile_source_path)[-1],
+                               bagfile_unpack_direcory,
+                               reader_object.overview['general_meta']['start_time_unix'],
+                               reader_object.overview['general_meta']['end_time_unix'],
+                               list(reader_object.topics),
+                               False]], columns=bagfile_db.columns)
+
+                # Concat to existing db_file
+                bagfile_db = pd.concat([bagfile_db, tmp_line_df])
+                counter += 1
 
             # Go through list of sensors to export
             for _, sensor_line in sensor_export.iterrows():
@@ -450,4 +471,7 @@ if __name__ == "__main__":
                 except:
                     print("Not all expected sensors are present in the bagfile")
 
-    print(f"DEBUG: Finished exporting {len(bagfile_source_directory)} bagfiles!")
+    # Save bagfile_db_file
+    bagfile_db.reset_index(drop=True).to_feather(os.path.join(bagfile_unpack_direcory, bagfile_db_file))
+
+    print(f"DEBUG: Finished exporting {counter} bagfiles!")
