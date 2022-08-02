@@ -175,7 +175,7 @@ with rosbag_reader("../2022-04-28-track3.bag") as reader_object:
 bag_pandas = data_as_pandas('2022-04-28-track3')
 bag_pandas.load_from_working_directory()
 print(1)
-"""
+
 #timeline_plotting.create_timeline_plot(bag_pandas, ['pressure_sensor_0', 'magnetic_field_sensor_0', 'magnetic_field_sensor_0', 'magnetic_field_sensor_0', 'left_range_sensor_0', 'camera_0', 'interpretation/manual_ground_truth'], ['fluid_pressure', 'x', 'y', 'z','range_cm', 'overlap', 'vehicle_encounter'])
 #timeline_plotting.create_timeline_plot(bag_pandas, ['left_range_sensor_0'], ['range_cm'])
 # ---- Testing below --------------------------------------------
@@ -191,7 +191,7 @@ nav = bag_pandas.dataframes['gnss_0'].dataframe
 #pre = bag_pandas.dataframes['pressure_sensor_0'].dataframe
 dist = bag_pandas.dataframes['left_range_sensor_0'].dataframe
 
-width = bag_pandas.dataframes['camera_0'].dataframe
+#width = bag_pandas.dataframes['camera_0'].dataframe
 
 
 # Interpolate data
@@ -200,14 +200,11 @@ nav_pre = pd.DataFrame(nav.iloc[:,1:-1]).reindex(index=mixed_index).interpolate(
 nav_pre = gpd.GeoDataFrame(nav_pre, geometry=gpd.points_from_xy(nav_pre.lon, nav_pre.lat))
 nav_pre.set_crs(epsg=4326, inplace=True)
 
-mixed_index = dist.index.join(width.index, how='outer')
-width_pre = width.reindex(index=mixed_index).interpolate().reindex(dist.index)
-
 print(0)
 
 # TODO: TEMPORÄR FILTEr ------------------------------------------------------------------------
-dist.loc[(dist.range_cm >= 150), 'range_cm'] = np.nan
+dist.loc[(dist.range_cm >= 180), 'range_cm'] = np.nan
 
 # Plot as map
-map_plotting.create_map_plot(nav_pre, dist, 'range_cm', destination_width=200)
+map_plotting.create_map_plot(nav_pre, dist, 'range_cm', nav, destination_width=750)
 

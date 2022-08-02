@@ -416,3 +416,38 @@ class rosbag_reader:
         self.overview['sensor_streams'][export_filename_pure]['is_in_folder'] = is_in_folder
         self.overview['sensor_streams'][export_filename_pure]['is_geo'] = is_geo
         self.overview['sensor_streams'][export_filename_pure]['pretty_print'] = pretty_print
+
+if __name__ == "__main__":
+    # Set bagfile path
+    bagfile_source_directory = "../"
+    directory_content = os.listdir(bagfile_source_directory)
+    bagfile_source_paths = [os.path.join(bagfile_source_directory, file) for file in directory_content if file[:-3] == 'bag']
+
+    # Set export directory
+    bagfile_unpack_direcory = ".."
+
+    # Name of database feather file
+    bagfile_db_file = "trajectory_db.feather"
+
+    # Create if none existant
+    if not os.path.isfile(os.path.join(bagfile_unpack_direcory, bagfile_db_file)):
+        bagfile_db = pd.DataFrame(columns=['name', 'time_beg', 'time_end', 'processed'])
+    else:
+        bagfile_db = pd.read_feather(os.path.join(bagfile_unpack_direcory, bagfile_db_file))
+
+    # Read config file for sensors to import
+    sensor_export = pd.read_csv('export_sensors_tmp.csv')
+
+    # Ingest bag files via config file
+    for bagfile_source_path in bagfile_source_paths:
+        with rosbag_reader(bagfile_source_path, bagfile_unpack_direcory) as reader_object:
+            # print(reader_object.topics)
+
+            # Go through list of sensors to export
+            for _, sensor_line in sensor_export.iterrows():
+                try:
+                    reader_object.export_flex(sensor_line['sens_type'], sensor_line['topic_name'], sensor_line['sensor_name'], sensor_line['pretty_print'], sensor_line['subsampling'])
+                except:
+                    print("Not all expected sensors are present in the bagfile")
+
+    print(f"DEBUG: Finished exporting {len(bagfile_source_directory)} bagfiles!")

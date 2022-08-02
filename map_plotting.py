@@ -4,8 +4,10 @@ from itertools import product
 from skimage import io as skio
 import numpy as np
 import geopandas as gpd
+
 import matplotlib.pyplot as plt
 import seaborn as sns
+from palettable.cartocolors.sequential import OrYel_4_r
 
 from helper import *
 
@@ -52,7 +54,8 @@ def generate_OSM_image(left_bound, right_bound, upper_bound, lower_bound, zoom, 
     # Iterate through raster of tiles
     for x_tile, y_tile in product(range(x0_tile, x1_tile), range(y0_tile, y1_tile)):
         # Assemble image url
-        imgurl = 'http://a.tile.openstreetmap.fr/hot/%d/%d/%d.png' % (zoom, x_tile, y_tile)
+        #imgurl = 'http://a.tile.openstreetmap.fr/hot/%d/%d/%d.png' % (zoom, x_tile, y_tile)
+        imgurl = 'https://stamen-tiles.a.ssl.fastly.net/toner-lite/%d/%d/%d.png' % (zoom, x_tile, y_tile)
         print(imgurl)
 
         # Get image via sklearn
@@ -129,9 +132,9 @@ def format_ticks_deg(ax, bounding_box):
     return ax
 
 
-def create_map_plot(trajectory_df, secondary_data_df, secondary_data_key, destination_width=500):
+def create_map_plot(trajectory_resampled_df, secondary_data_df, secondary_data_key, trajectory_df, destination_width=500):
     # If no tertiary data given, replace with constant
-    plot_sizes = 2
+    plot_sizes = 50
 
     # Apply the default theme
     sns.set_theme()
@@ -146,16 +149,21 @@ def create_map_plot(trajectory_df, secondary_data_df, secondary_data_key, destin
     fig, ax = plt.subplots()
 
     # Scatter GNSS data on top
-    xy = trajectory_df.to_crs(epsg=3857).geometry.map(lambda point: point.xy)
-    x, y = zip(*xy)
-    #ax.scatter(x=x, y=y, c='red', cmap='cool', s=1)
-    ax.scatter(x=x, y=y, c=secondary_data_df[secondary_data_key], cmap='cool', s=plot_sizes)
+    # Trajectory
+    axp = ax.plot(trajectory_df.iloc[1:].to_crs(epsg=3857).geometry.x, trajectory_df.iloc[1:].to_crs(epsg=3857).geometry.y, zorder=0, linewidth=3)
+    # Positions of critical encounters
+    axs = ax.scatter(x=trajectory_resampled_df.iloc[1:].to_crs(epsg=3857).geometry.x, y=trajectory_resampled_df.iloc[1:].to_crs(epsg=3857).geometry.y, c=secondary_data_df[secondary_data_key].iloc[1:]-30, vmin=0, vmax=150, cmap=OrYel_4_r.mpl_colormap, s=plot_sizes, zorder=1)
+    # Add colorbar for scatter
+    cbar = plt.colorbar(axs)
+    cbar.set_label('Abstand aus Ultraschallsensor [cm]')
 
     # Insert image into bounds
-    ax.imshow(map_img, extent=(bounding_box.geometry.x[0], bounding_box.geometry.x[1], bounding_box.geometry.y[0], bounding_box.geometry.y[1]))
+    ax.imshow(map_img, extent=(bounding_box.geometry.x[0], bounding_box.geometry.x[1], bounding_box.geometry.y[0], bounding_box.geometry.y[1]), zorder=-1)
 
     # Set plotting and tick format
     ax = format_ticks_deg(ax, bounding_box)
+
+
 
     # Show the plot
     plt.show()
