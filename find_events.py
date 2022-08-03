@@ -21,6 +21,7 @@ MIN_ENCOUNTER_DURATION = 0.5
 MAX_ENCOUNTER_DURATION = 6
 MIN_FRAMES_WITH_DETECTION = 0.25
 
+
 class DataframeWithMeta:
     def __init__(self, dataframe, meta, orig_file_name):
         # Put dataframe into struct
