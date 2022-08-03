@@ -12,6 +12,14 @@ import matplotlib as plt
 from ingest import *
 from helper import *
 import detect_cars
+import detect_flow
+
+# Set base rules for overtaking car
+MIN_BOUNDING_BOX_HEIGHT = 150
+MIN_SELF_SPEED_M_S = 2
+MIN_ENCOUNTER_DURATION = 0.5
+MAX_ENCOUNTER_DURATION = 6
+MIN_FRAMES_WITH_DETECTION = 0.25
 
 class DataframeWithMeta:
     def __init__(self, dataframe, meta, orig_file_name):
@@ -76,21 +84,62 @@ class VehicleEncounter:
             self.cropped_bagfile_pandas.dataframes['left_range_sensor_0'].dataframe['range_cm'].values > 1000] = np.NAN
 
         # Calculate average range measurement
-        self.mean_distance = self.cropped_bagfile_pandas.dataframes['left_range_sensor_0'].dataframe['range_cm'].mean()
+        self.mean_side_distance_cm = self.cropped_bagfile_pandas.dataframes['left_range_sensor_0'].dataframe['range_cm'].mean()
 
-        # Calculate average speed
+        # Calculate speed for every pair of consecutive values
+        utm_pos = self.cropped_bagfile_pandas.dataframes['gnss_0'].dataframe.geometry.to_crs(epsg=32632)
+        speed_array = np.empty((0))
+        vector_array = np.empty((0, 2))
+        for (pos_0, pos_1, time_0, time_1) in zip(utm_pos.values, utm_pos.values[1:], utm_pos.index, utm_pos.index[1:]):
+            pos_delta = pos_0.distance(pos_1)
+            time_delta = time_1 - time_0
 
-        pass
+            # Append speed to list of speeds
+            speed_array = np.append(speed_array, [pos_delta / time_delta.total_seconds()])
+
+            # Get vector of two points and normalize
+            vector_array = np.append(vector_array, [[pos_1.x - pos_0.x, pos_1.y - pos_0.y]], axis=0)
+
+        # Calculate mean speed
+        self.mean_speed_m_s = np.mean(speed_array)
+
+        # Calculate mean heading
+        self.mean_heading_rad = np.arctan2(np.mean(vector_array, axis=0)[0], np.mean(vector_array, axis=0)[1])
 
     def verify_encounter(self):
+        # Break immediately if duration does not meet criteria
+        duration_s = self.encounter_end - self.encounter_begin
+        if duration_s < MIN_ENCOUNTER_DURATION or duration_s > MAX_ENCOUNTER_DURATION:
+            print((False, False), self.encounter_begin, self.encounter_end)
+            return
+
+        # Calculate mete data
+        self.calc_meta_info()
+
+        # Ensure minimal speed criteria is met
+        if self.mean_speed_m_s < MIN_SELF_SPEED_M_S:
+            print((False, False), self.encounter_begin, self.encounter_end)
+            return
+
         # Run YOLO5
         self.yolo5 = detect_cars.CarDetector(self.image_list)
         self.yolo5_results = self.yolo5.manage_detection()
 
-        # Run Raft
+        # Filter out bounding boxes, that do not meet minimal size criterium
+        self.yolo5_results_filtered = self.yolo5_results[self.yolo5_results['ymax'] - self.yolo5_results['ymin'] >= MIN_BOUNDING_BOX_HEIGHT]
 
+        # Check that at least in n percent of the frames, there is a valid detection
+        if len(self.yolo5_results_filtered.image_name.unique()) / len(self.image_list) <= MIN_FRAMES_WITH_DETECTION:
+            print((False, False), self.encounter_begin, self.encounter_end)
+            return
+
+        # Run Raft
+        self.raft = detect_flow.FlowDetector(self.image_list, self.mean_side_distance_cm, self.mean_speed_m_s,
+                                     standalone_mode=False, yolo_bounding_boxes=self.yolo5_results_filtered)
+        self.raft_results = self.raft.get_flow_results()
         # Set Flag
-        pass
+
+        print(self.raft_results, self.encounter_begin, self.encounter_end)
 
 class DataAsPandas:
     def __init__(self, directory):
@@ -226,7 +275,8 @@ if __name__ == "__main__":
     encounter_max_dist = 300
 
     # TODO: Traverse Trajectories(s) for TOIs
-    for i, bagfile_db_entry in bagfile_db.iterrows():
+    for count_bagfile, bagfile_db_entry in bagfile_db.iterrows():
+        print(f"DEBUG: Checking bagfile {count_bagfile}")
         # Get bagfile path
         bagfile_path = os.path.join(bagfile_db_entry['directory'], bagfile_db_entry['name'][:-4])
 
@@ -238,5 +288,6 @@ if __name__ == "__main__":
         encounter_list = traverse_bag_vehicle_encounters(bagfile_path, encounter_max_dist, bagfile_pandas)
 
         # Verify TOIs as real encounters
-        for encounter in encounter_list:
+        for count_encounter, encounter in enumerate(encounter_list):
+            print(f"DEBUG: Checking encounter {count_encounter} in bafile number {count_bagfile}")
             encounter.verify_encounter()

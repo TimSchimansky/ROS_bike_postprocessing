@@ -22,7 +22,7 @@ import torchvision.io
 # Set constant values
 FLOW_IMG_WIDTH = 640
 FLOW_IMG_HEIGHT = 360
-CAMERA_OPENING_ANGLE_DEG = 170
+CAMERA_OPENING_ANGLE_DEG = 117
 
 class FlowDetector:
     def __init__(self, image_sequence, measured_distance, measured_speed, image_type='.png', standalone_mode=True, yolo_bounding_boxes=None):
@@ -63,7 +63,7 @@ class FlowDetector:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # Save measured data for paralax threshold calculation
-        self.obj_distance = measured_distance
+        self.obj_distance = measured_distance / 100
         self.bike_speed = measured_speed
 
         # Setup model
@@ -160,7 +160,7 @@ class FlowDetector:
 
             # Set up masks
             mask_list = []
-            background_box_mask = np.ones((raft.flow_img_height, raft.flow_img_width), dtype=bool)
+            background_box_mask = np.ones((self.flow_img_height, self.flow_img_width), dtype=bool)
             for _, yolo_bounding_box in curr_yolo_bounding_boxes.iterrows():
                 # Get bounds from current row, scale and convert to int
                 yolo_bounding_box_values = list(yolo_bounding_box[['ymin', 'ymax', 'xmin', 'xmax']])
@@ -177,7 +177,7 @@ class FlowDetector:
 
             # Decide if moving object is present
             threshold_pixelshift = self.estimate_paralax_threshold(self.image_path_to_unix(image_path_1), self.image_path_to_unix(image_path_0))
-            is_moving_vehicle, is_overtaking = self.check_for_moving_objects(mask_list, background_box_mask, flow_array_distance, flow_array_angle, threshold_pixelshift)
+            is_moving_vehicle, is_overtaking = self.check_for_moving_objects(mask_list, background_box_mask, flow_array_distance, flow_array_angle, threshold_pixelshift, curr_yolo_bounding_boxes)
             self.result_list_is_moving_vehicle.append(is_moving_vehicle)
             self.result_list_is_overtaking.append(is_overtaking)
 
@@ -186,7 +186,7 @@ class FlowDetector:
             #torchvision.io.write_jpeg(tmp_flow_img, os.path.join(self.working_directory, "dense_optical_flow", f"predicted_flow_{i}.jpg"))
 
 
-    def check_for_moving_objects(self, mask_list, background_box_mask, flow_array_distance, flow_array_angle, threshold_pixelshift, threshold_multiplier=1.025):
+    def check_for_moving_objects(self, mask_list, background_box_mask, flow_array_distance, flow_array_angle, threshold_pixelshift, yolo_bounding_boxes, threshold_multiplier=1.025):
         """Returns tuple of boolean (is_moving_vehicle, is_overtaking, estimated_speed)
         speed estimation not yet implemented"""
         # Initialize booleans for result
@@ -194,7 +194,7 @@ class FlowDetector:
         is_overtaking = False
 
         # Iterate over all bounding boxes of current image
-        for box_index, box_mask in enumerate(mask_list):
+        for box_index, (box_mask, (_, yolo_bounding_box)) in enumerate(zip(mask_list, yolo_bounding_boxes.iterrows())):
             # Calculate KDE for distance and angle
             kde_distance = calculate_kde(flow_array_distance, box_mask, background_box_mask)
             kde_anglular = calculate_kde(flow_array_angle, box_mask, background_box_mask, angular_mode=True)
@@ -203,7 +203,11 @@ class FlowDetector:
             lower_acceptance_angle_value = np.pi / 2 - np.pi / 8
             upper_acceptance_angle_value = np.pi / 2 + np.pi / 8
 
-            if kde_anglular[0] <= upper_acceptance_angle_value and kde_anglular[0] >= lower_acceptance_angle_value:
+            if yolo_bounding_box["name"] == 'person' or yolo_bounding_box["name"] == 'bycicle':
+                tmp_is_moving_vehicle = False
+                tmp_is_overtaking = False
+
+            elif kde_anglular[0] <= upper_acceptance_angle_value and kde_anglular[0] >= lower_acceptance_angle_value:
                 # Case 1: Overtaking Vehicle
                 tmp_is_moving_vehicle = True
                 tmp_is_overtaking = True
@@ -243,7 +247,7 @@ class FlowDetector:
 
         # Transfer angle to pixels
         relative_angle = angular_delta / self.camera_opening_angle
-        return relative_angle * self.input_img_width
+        return relative_angle * self.flow_img_width
 
 
 def quick_show(image):
