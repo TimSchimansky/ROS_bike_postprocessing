@@ -437,22 +437,25 @@ if __name__ == "__main__":
         bagfile_db = pd.read_feather(os.path.join(bagfile_unpack_direcory, bagfile_db_file))
 
     # Read config file for sensors to import
-    sensor_export = pd.read_csv('export_sensors_tmp.csv')
+    sensor_export = pd.read_csv('export_sensors.csv')
 
     # Ingest bag files via config file
     counter = 0
     for bagfile_source_path in bagfile_source_paths:
-        # Fix broken headers
-        #fix_bag.replace_with_fixed(bagfile_source_path)
 
         # Unpack bag file
         with rosbag_reader(bagfile_source_path, bagfile_unpack_direcory) as reader_object:
             # If not in there add file to db file (list can be used to reingest bagfiles)
-            if (os.path.split(bagfile_source_path)[-1] in bagfile_db.name.values) and (os.path.split(bagfile_source_path)[-1] not in []):
+            if (os.path.split(bagfile_source_path)[-1] in bagfile_db.name.values) and (os.path.split(bagfile_source_path)[-1] not in ["2022-07-30-14-09-56_0.bag"]):
                 print(f"DEBUG: File {os.path.split(bagfile_source_path)[-1]} is already ingested")
                 continue
             else:
                 print(f"DEBUG: File {os.path.split(bagfile_source_path)[-1]} will now be ingested")
+
+                # Fix broken headers
+                fix_bag.replace_with_fixed(bagfile_source_path)
+
+                # Create dataframe
                 tmp_line_df = pd.DataFrame([[os.path.split(bagfile_source_path)[-1],
                                bagfile_unpack_direcory,
                                reader_object.overview['general_meta']['start_time_unix'],

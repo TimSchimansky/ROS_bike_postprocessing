@@ -20,6 +20,7 @@ MIN_SELF_SPEED_M_S = 2
 MIN_ENCOUNTER_DURATION = 0.5
 MAX_ENCOUNTER_DURATION = 6
 MIN_FRAMES_WITH_DETECTION = 0.25
+MAX_SINGLE_ENCOUNTER_VARIATION_CM = 100
 
 
 class DataframeWithMeta:
@@ -46,9 +47,10 @@ class VehicleEncounter:
         self.cropped_bagfile_pandas = cropped_bagfile_pandas
 
         # Set Flags
+        self.is_tested = False
         self.is_confirmed = False
 
-        # Set moving direction (-1:undetermined, 0:overtake, 1:opposing)
+        # Set moving direction (-1:undetermined, 0:opposing, 1:overtake)
         self.movement_direction = -1
 
         # Write time span to class and enlarge by factor (external helper function)
@@ -108,10 +110,24 @@ class VehicleEncounter:
         self.mean_heading_rad = np.arctan2(np.mean(vector_array, axis=0)[0], np.mean(vector_array, axis=0)[1])
 
     def verify_encounter(self):
+        # Run tests
+        self.run_tests()
+
+        # Set flags
+        self.is_tested = True
+        self.is_confirmed = self.results[0]
+        if self.is_confirmed == True:
+            self.movement_direction = int(self.results[1])
+
+        return self.is_confirmed, self.movement_direction, self.encounter_begin, self.encounter_end, self.reason
+
+    def run_tests(self):
         # Break immediately if duration does not meet criteria
         duration_s = self.encounter_end - self.encounter_begin
         if duration_s < MIN_ENCOUNTER_DURATION or duration_s > MAX_ENCOUNTER_DURATION:
-            print((False, False), self.encounter_begin, self.encounter_end)
+            # print((False, False), self.encounter_begin, self.encounter_end)
+            self.results = (False, False)
+            self.reason = "Unrealistically long/short"
             return
 
         # Calculate mete data
@@ -119,7 +135,9 @@ class VehicleEncounter:
 
         # Ensure minimal speed criteria is met
         if self.mean_speed_m_s < MIN_SELF_SPEED_M_S:
-            print((False, False), self.encounter_begin, self.encounter_end)
+            # print((False, False), self.encounter_begin, self.encounter_end)
+            self.results = (False, False)
+            self.reason = "Self not moving (enough)"
             return
 
         # Run YOLO5
@@ -127,20 +145,21 @@ class VehicleEncounter:
         self.yolo5_results = self.yolo5.manage_detection()
 
         # Filter out bounding boxes, that do not meet minimal size criterium
-        self.yolo5_results_filtered = self.yolo5_results[self.yolo5_results['ymax'] - self.yolo5_results['ymin'] >= MIN_BOUNDING_BOX_HEIGHT]
+        self.yolo5_results_filtered = self.yolo5_results[
+            self.yolo5_results['ymax'] - self.yolo5_results['ymin'] >= MIN_BOUNDING_BOX_HEIGHT]
 
         # Check that at least in n percent of the frames, there is a valid detection
         if len(self.yolo5_results_filtered.image_name.unique()) / len(self.image_list) <= MIN_FRAMES_WITH_DETECTION:
-            print((False, False), self.encounter_begin, self.encounter_end)
+            # print((False, False), self.encounter_begin, self.encounter_end)
+            self.results = (False, False)
+            self.reason = "Not enough visual detections"
             return
 
         # Run Raft
         self.raft = detect_flow.FlowDetector(self.image_list, self.mean_side_distance_cm, self.mean_speed_m_s,
-                                     standalone_mode=False, yolo_bounding_boxes=self.yolo5_results_filtered)
-        self.raft_results = self.raft.get_flow_results()
-        # Set Flag
-
-        print(self.raft_results, self.encounter_begin, self.encounter_end)
+                                             standalone_mode=False, yolo_bounding_boxes=self.yolo5_results_filtered)
+        self.results = self.raft.get_flow_results()
+        self.reason = "Ran through tests"
 
 class DataAsPandas:
     def __init__(self, directory):
@@ -254,6 +273,12 @@ def traverse_bag_vehicle_encounters(bagfile_directory, encounter_max_dist, bagfi
         begin_timestamp = side_dist.iloc[[begin_index]].index
         end_timestamp = side_dist.iloc[[end_index]].index
 
+        # Check if sudden jump in range (Background, (but triggered) --> car --> background)
+        tmp_range_values = side_dist.iloc[begin_index:end_index].range_cm.values
+        potential_jumps = (np.where(np.diff(tmp_range_values) >= MAX_SINGLE_ENCOUNTER_VARIATION_CM))[0]
+        if len(potential_jumps) != 0:
+            warnings.warn(f"Unrealistic large jump between {begin_timestamp} and {end_timestamp}!")
+
         # Get trimmed version of data as pandas
         cropped_bagfile_pandas = bagfile_pandas.get_trimmed_copy((begin_timestamp, end_timestamp), 10)
 
@@ -291,4 +316,4 @@ if __name__ == "__main__":
         # Verify TOIs as real encounters
         for count_encounter, encounter in enumerate(encounter_list):
             print(f"DEBUG: Checking encounter {count_encounter} in bafile number {count_bagfile}")
-            encounter.verify_encounter()
+            print(encounter.verify_encounter())
