@@ -99,7 +99,7 @@ def determine_zoom_level(left_bound, right_bound, destination_width_px, tile_siz
 
 def calc_map_size(trajectory, destination_width):
     # Calculate data boundaries
-    left_bound, lower_bound, right_bound, upper_bound = trajectory.total_bounds
+    left_bound, lower_bound, right_bound, upper_bound = trajectory.to_crs(epsg=4326).total_bounds
 
     # Calculate zoom level from predefined destination width
     zoom = determine_zoom_level(left_bound, right_bound, destination_width)
@@ -113,9 +113,9 @@ def format_ticks_deg(ax, bounding_box):
     ax.set_xlim(bounding_box.geometry.x[0], bounding_box.geometry.x[1])
 
     # Reformat ticks to epsg:4326
-    ax.set_xticks(np.linspace(bounding_box.geometry.x[0], bounding_box.geometry.x[1], 5))
+    ax.set_xticks(np.linspace(bounding_box.geometry.x[0], bounding_box.geometry.x[1], 3))
     xlabel_array = np.linspace(bounding_box.to_crs(epsg=4326).geometry.x[0],
-                               bounding_box.to_crs(epsg=4326).geometry.x[1], 5)
+                               bounding_box.to_crs(epsg=4326).geometry.x[1], 3)
     xlabel_list = []
     for i, xlabel in enumerate(xlabel_array):
         xlabel_list.append(dec_2_dms(xlabel))

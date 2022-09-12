@@ -7,12 +7,16 @@ import imageio
 import datetime
 
 import matplotlib.pyplot as plt
+import matplotlib
+import matplotlib.font_manager as fm
+matplotlib.use('Qt5Agg')
 import seaborn as sns
 
 import scipy as scp
+from scipy.signal import find_peaks
 
 import torch
-#from torchvision.models.optical_flow import Raft_Large_Weights
+from torchvision.models.optical_flow import Raft_Large_Weights
 from torchvision.models.optical_flow import raft_large
 import torchvision.transforms.functional as F
 import torchvision.transforms as T
@@ -25,7 +29,9 @@ FLOW_IMG_HEIGHT = 360
 CAMERA_OPENING_ANGLE_DEG = 117
 
 class FlowDetector:
-    def __init__(self, image_sequence, measured_distance, measured_speed, image_type='.png', standalone_mode=True, yolo_bounding_boxes=None):
+    def __init__(self, image_sequence, measured_distance, measured_speed, image_type='.png', standalone_mode=True, yolo_bounding_boxes=None, save_img=False):
+        self.save_img = save_img
+
         if standalone_mode:
             # Set working directory
             self.working_directory = image_sequence
@@ -40,12 +46,16 @@ class FlowDetector:
             # Get feather file of detections from same folder
             self.yolo_bounding_boxes = pd.read_feather(os.path.join(image_sequence, 'camera_0.feather'))
 
+            self.img_out_path = working_directory
+
         elif not standalone_mode and yolo_bounding_boxes is not None:
             # Save list of image paths for later use
             self.image_path_list = image_sequence
 
             # Save bounding boxes for later use
             self.yolo_bounding_boxes = yolo_bounding_boxes
+
+            self.img_out_path = None
 
         else:
             pass
@@ -67,7 +77,7 @@ class FlowDetector:
         self.bike_speed = measured_speed
 
         # Setup model
-        self.model = raft_large(pretrained=True, progress=False).to(self.device)
+        self.model = raft_large(weights=Raft_Large_Weights.DEFAULT, progress=False).to(self.device)
         self.model = self.model.eval()
 
         # Setup empty lists to acumulate results
@@ -105,10 +115,13 @@ class FlowDetector:
         # Run detection
         self.manage_flow_on_sequence()
 
+        # Release video memory
+        torch.cuda.empty_cache()
+
         # Decide if threshold is reached
         ratio_positives = sum(self.result_list_is_moving_vehicle) / len(self.result_list_is_moving_vehicle)
 
-        if ratio_positives < 1/2: #1/2:
+        if ratio_positives < 1/4: #1/2:
             # Not enough positives to confirm car
             return False, False
         else:
@@ -130,9 +143,6 @@ class FlowDetector:
                 return True, True
 
     def manage_flow_on_sequence(self):
-        # Create empty list for tensors
-        image_flow_list = []
-
         # Iterate over all frames
         for image_index, (image_path_0, image_path_1) in tqdm(enumerate(zip(self.image_path_list, self.image_path_list[1:])), desc="sequence", total=len(self.image_path_list[1:])):
 
@@ -140,11 +150,18 @@ class FlowDetector:
             image_0_raw = torchvision.io.read_image(image_path_0)
             image_1_raw = torchvision.io.read_image(image_path_1)
 
+            if os.path.split(image_path_0)[-1] == "1659937922.879283239.png":
+                print('hi')
+
             # Feed images to classifier
             tmp_flow = self.classify_by_model(image_0_raw, image_1_raw)
 
             # Put result into list
             flow_array = tmp_flow[-1][0, ...].cpu().detach().numpy()
+
+            if self.img_out_path is not None and self.save_img == True:
+                flow_img = flow_to_image(flow_array)
+
 
             # Determine timestamp of images as unix
             unix_timestamp_0 = pd.to_datetime(self.image_path_to_unix(image_path_0), unit='s')
@@ -186,7 +203,7 @@ class FlowDetector:
             #torchvision.io.write_jpeg(tmp_flow_img, os.path.join(self.working_directory, "dense_optical_flow", f"predicted_flow_{i}.jpg"))
 
 
-    def check_for_moving_objects(self, mask_list, background_box_mask, flow_array_distance, flow_array_angle, threshold_pixelshift, yolo_bounding_boxes, threshold_multiplier=1.025):
+    def check_for_moving_objects(self, mask_list, background_box_mask, flow_array_distance, flow_array_angle, threshold_pixelshift, yolo_bounding_boxes, threshold_multiplier=1.1):
         """Returns tuple of boolean (is_moving_vehicle, is_overtaking, estimated_speed)
         speed estimation not yet implemented"""
         # Initialize booleans for result
@@ -216,6 +233,7 @@ class FlowDetector:
                 # Case 2: Opposing vehicle
                 # Since ambiguous if just parallax, additional check is made
                 if kde_distance[0] >= threshold_pixelshift * threshold_multiplier:
+                    print(kde_distance[0], threshold_pixelshift * threshold_multiplier)
                     tmp_is_moving_vehicle = True
                     tmp_is_overtaking = False
 
@@ -265,31 +283,47 @@ def calculate_kde(flow_array, box_mask, background_box_mask, angular_mode=False,
     """Calculate kernel density estimation, switching between standard approach by scipy and custom von mises approach,
     that allows circular data (angles)"""
 
+    in_box = flow_array[box_mask][~np.isnan(flow_array[box_mask])]
+    out_box = flow_array[background_box_mask][~np.isnan(flow_array[background_box_mask])]
+
     # Switch based on mode
     if angular_mode:
         # Calculate circular kde for angle inside and outside of bounding box
-        bin_centers, inside_kde = vonmises_fft_kde(flow_array[box_mask], kappa)
-        _, outside_kde = vonmises_fft_kde(flow_array[background_box_mask], kappa)
+        bin_centers, inside_kde = vonmises_fft_kde(in_box, kappa)
+        _, outside_kde = vonmises_fft_kde(out_box, kappa)
 
         # Fill dummy
         upper_lim = None
 
+        # Determine max values
+        inside_max = bin_centers[np.argmax(inside_kde)]
+        outside_max = bin_centers[np.argmax(outside_kde)]
+
     else:
         # Upper limit for kde
-        upper_lim = int(np.ceil(np.max(flow_array)))
+        upper_lim = int(np.ceil(np.nanmax(flow_array)))
 
         # Create x-grid for kde
         bin_centers = np.linspace(0, upper_lim, upper_lim + 1, endpoint=True)
 
         # Calculate classic kde for distance inside and outside of bounding box
-        inside_kde_manager = scp.stats.gaussian_kde(flow_array[box_mask], bw_method=kappa/flow_array[box_mask].std(ddof=1))
+
+        inside_kde_manager = scp.stats.gaussian_kde(in_box, bw_method=kappa/in_box.std(ddof=1))
         inside_kde = inside_kde_manager.evaluate(bin_centers)
-        outside_kde_manager = scp.stats.gaussian_kde(flow_array[background_box_mask], bw_method=kappa/flow_array[background_box_mask].std(ddof=1))
+
+        outside_kde_manager = scp.stats.gaussian_kde(out_box, bw_method=kappa/out_box.std(ddof=1))
         outside_kde = outside_kde_manager.evaluate(bin_centers)
 
-    # Determine max values
-    inside_max = bin_centers[np.argmax(inside_kde)]
-    outside_max = bin_centers[np.argmax(outside_kde)]
+        # Determine max values
+        peak_in = find_peaks(inside_kde, height=np.std(inside_kde))
+        inside_max = peak_in[0][np.argmax(peak_in[1])]
+
+        inside_max = np.argmax(inside_kde)
+
+        peak_out = find_peaks(outside_kde, height=np.std(outside_kde))
+        outside_max = peak_out[0][np.argmax(peak_out[1])]
+
+        outside_max = np.argmax(outside_kde)
 
     # Return results
     if plotting_mode:
@@ -323,28 +357,41 @@ def plot_kde(flow_array_distance, flow_array_angle, box_mask, background_box_mas
     # Set seaborn as theme
     sns.set_theme()
 
+    flow_array_distance[np.logical_and(flow_array_distance <= 15, box_mask)] = np.nan
+    flow_array_angle[np.logical_and(flow_array_distance <= 15, box_mask)] = np.nan
+
     # Calculate kde for distance and angle
     kde_result_distance = calculate_kde(flow_array_distance, box_mask, background_box_mask, angular_mode=False, plotting_mode=True, kappa=kappa)
     kde_result_angle = calculate_kde(flow_array_angle, box_mask, background_box_mask, angular_mode=True, plotting_mode=True, kappa=kappa)
 
+    print('dist:', kde_result_distance)
+    print('angl:', kde_result_angle)
+
     # Set up plot
     fig = plt.figure(figsize=(10,5))
+    font_property = fm.FontProperties(fname='cmunrm.ttf')
 
     # Cartesian subplot for displacement distance
     ax1 = fig.add_subplot(121)
     ax1.set_box_aspect(1)
-    ax1.plot(kde_result_distance[0], kde_result_distance[1], label="Innerhalb Bounding-Box")
+    ax1.plot(kde_result_distance[0], kde_result_distance[1], label="Außerhalb Bounding-Box")
     ax1.fill_between(x = kde_result_distance[0], y1 = kde_result_distance[1], alpha= 0.25, label='_nolegend_')
     ax1.axvline(kde_result_distance[2], 0, 1, linestyle='--', c=sns.color_palette()[0], label="Dominanter Wert")
-    ax1.plot(kde_result_distance[0], kde_result_distance[3], label="Außerhalb Bounding-Box")
+    ax1.plot(kde_result_distance[0], kde_result_distance[3], label="Innerhalb Bounding-Box")
     ax1.fill_between(x = kde_result_distance[0], y1 = kde_result_distance[3], alpha= 0.25, label='_nolegend_')
     ax1.axvline(kde_result_distance[4], 0, 1, linestyle='--', c=sns.color_palette()[1], label="Dominanter Wert")
-    ax1.set_xlabel("Verschiebungsbetrag [px]")
+    ax1.set_xlabel("Verschiebungsbetrag [px]", fontproperties=font_property)
     ax1.set_xlim([0, kde_result_distance[5]])
     ax1.set_ylim(bottom=0)
 
+    # Set Computer Moedern as tick font
+    for label in ax1.get_xticklabels():
+        label.set_fontproperties(font_property)
+    for label in ax1.get_yticklabels():
+        label.set_fontproperties(font_property)
+
     # Set legend
-    fig.legend(loc='upper center', bbox_to_anchor=[0.35, 0.85])
+    fig.legend(loc='upper center', bbox_to_anchor=[0.35, 0.85], prop=font_property)
 
     # Polar subplot for displacement angle
     ax2 = fig.add_subplot(122, polar=True)
@@ -356,17 +403,54 @@ def plot_kde(flow_array_distance, flow_array_angle, box_mask, background_box_mas
     ax2.plot(kde_result_angle[0], kde_result_angle[3])
     ax2.fill(kde_result_angle[0], kde_result_angle[3], alpha=0.25)
     ax2.axvline(kde_result_angle[4], 0, 1, linestyle='--', c=sns.color_palette()[1])
-    ax2.set_xlabel("Bewegungsrichtung [°]")
+    ax2.set_xlabel("Bewegungsrichtung [°]", fontproperties=font_property)
+
+    # Set Computer Moedern as tick font
+    for label in ax2.get_xticklabels():
+        label.set_fontproperties(font_property)
+    for label in ax2.get_yticklabels():
+        label.set_fontproperties(font_property)
+
+    # Export as pdf
+    fig.savefig('../kde1.svg', bbox_inches='tight')
 
     plt.show()
 
 if __name__ == "__main__":
-    # For standalone debugging
-    working_directory = '../data/2022-04-28-track2/camera_0_subset'
+    """# For standalone debugging
+    working_directory = '../kde_demo_for_thesis'
     image_type = 'png'
 
     event_range = 0.85
     bike_speed = 4.276
 
-    raft = FlowDetector(working_directory, event_range, bike_speed, image_type)
-    print(raft.get_flow_results())
+    raft = FlowDetector(working_directory, event_range, bike_speed, image_type, save_img=False)
+    print(raft.get_flow_results())"""
+
+    working_dir = os.path.join('..', 'kde_demo_for_thesis', 'out2')
+
+    flow_as_array = np.load(os.path.join(working_dir, 'uff.npy'))
+
+    bounding_boxen = pd.read_feather(os.path.join(working_dir, 'bounds.feather'))
+
+    yolo_bounding_box = bounding_boxen.iloc[0]
+
+    # Get bounds from current row, scale and convert to int
+    yolo_bounding_box_values = list(yolo_bounding_box[['ymin', 'ymax', 'xmin', 'xmax']])
+    yolo_bounding_box_values_scaled = [int(corner / 2) for corner in yolo_bounding_box_values]
+    # yolo_bounding_box_values = [int(corner) for corner in yolo_bounding_box_values]
+
+    # Create mask array
+    tmp_box_mask = np.zeros((FLOW_IMG_HEIGHT, FLOW_IMG_WIDTH), dtype=bool)
+    tmp_box_mask[yolo_bounding_box_values_scaled[0]:yolo_bounding_box_values_scaled[1],yolo_bounding_box_values_scaled[2]:yolo_bounding_box_values_scaled[3]] = True
+
+    box_mask = tmp_box_mask
+    bg_mask = ~tmp_box_mask
+
+    # Flow array is present as cartesian-displacement, convert to polar
+    flow_array_distance = np.sqrt(flow_as_array[0, :, :] ** 2 + flow_as_array[1, :, :] ** 2)
+    flow_array_angle = np.arctan(flow_as_array[0, :, :], flow_as_array[1, :, :])
+
+    plot_kde(flow_array_distance, flow_array_angle, box_mask, bg_mask, kappa=10)
+
+    print(1)

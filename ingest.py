@@ -143,7 +143,7 @@ class rosbag_reader:
             temp_image = cv2.imdecode(np.frombuffer(msg.data, np.uint8), cv2.IMREAD_COLOR)
 
             # Write image into predefined folder
-            image_file_name = ("%s.%s.png" % (msg.header.stamp.secs, msg.header.stamp.nsecs))
+            image_file_name = ("%s.%s.png" % (msg.header.stamp.secs, str(msg.header.stamp.nsecs).zfill(9)))
             cv2.imwrite(os.path.join(export_directory, image_file_name), temp_image)
 
         # Add to list of exported data
