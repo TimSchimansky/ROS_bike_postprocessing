@@ -1,4 +1,4 @@
-name: ros_base
+name: ros_base_copy
 channels:
   - pytorch
   - anaconda

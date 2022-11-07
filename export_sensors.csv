@@ -5,4 +5,4 @@ sens_type,topic_name,sensor_name,pretty_print,subsampling
 "1d","/phone1/android/barometric_pressure","pressure_sensor_0","Barometer Note 9",None
 "1d","/phone1/android/fix","gnss_0","GNSS Note 9",None
 "1d","/side_distance","left_range_sensor_0","Abstandssensor seitlich links",None
-"im","/side_view/image_raw/compressed","camera_0","Kamera seitlich links",1
+"im","/side_view/image_raw/compressed","camera_0","Kamera seitlich links",4
