@@ -38,9 +38,13 @@ class CarDetector:
         for sub_image_path_list in self.split_image_path_list:
             self.results_frame_list.extend(self.batch_detection(sub_image_path_list))
 
-        # Concatente results
-        self.concatenated_results = pd.concat(self.results_frame_list, ignore_index=True, axis=0)
+        # Concatenate results if there are any
+        if len(self.results_frame_list) == 0:
+            return None
+        else:
+            self.concatenated_results = pd.concat(self.results_frame_list, ignore_index=True, axis=0)
 
+        # Switch return modes
         if self.folder_mode:
             # Export as feather file
             self.concatenated_results.to_feather(os.path.join(self.working_directory, 'camera_0.feather'))
@@ -85,8 +89,10 @@ class CarDetector:
 
 if __name__ == "__main__":
     # Assemble path to sequence of images
-    image_sequence_path = os.path.join('2022-04-28-track2', 'camera_0_subset')
+    image_sequence_path = os.path.join('..', 'speed_demo')
 
     # Run detector
     car_detector = CarDetector(image_sequence_path)
     car_detector.manage_detection()
+
+    print(1)

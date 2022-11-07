@@ -1,18 +1,23 @@
 # Native
 from itertools import compress
 import copy
+import os
 
 # Installed
 import pandas as pd
 from scipy import ndimage
 import numpy as np
-import matplotlib as plt
 
 # Own
 from ingest import *
 from helper import *
 import detect_cars
 import detect_flow
+
+# Debug
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
 
 # Set base rules for overtaking car
 MIN_BOUNDING_BOX_HEIGHT = 150
@@ -72,7 +77,6 @@ class VehicleEncounter:
         image_time_list = np.array([float('.'.join(file_name.split('.')[:-1])) for file_name in image_file_list])
 
         # Get period of interest
-        # TODO: Fix error
         boolean_list = list(np.logical_and((image_time_list >= self.encounter_begin), (image_time_list <= self.encounter_end)))
 
         # Get image names in period of interest
@@ -110,6 +114,9 @@ class VehicleEncounter:
         self.mean_heading_rad = np.arctan2(np.mean(vector_array, axis=0)[0], np.mean(vector_array, axis=0)[1])
 
     def verify_encounter(self):
+        # Calculate mete data
+        self.calc_meta_info()
+
         # Run tests
         self.run_tests()
 
@@ -119,7 +126,7 @@ class VehicleEncounter:
         if self.is_confirmed == True:
             self.movement_direction = int(self.results[1])
 
-        return self.is_confirmed, self.movement_direction, self.encounter_begin, self.encounter_end, self.reason
+        return self.is_confirmed, self.movement_direction, self.mean_side_distance_cm, self.mean_speed_m_s, self.mean_heading_rad, self.encounter_begin, self.encounter_end, self.reason
 
     def run_tests(self):
         # Break immediately if duration does not meet criteria
@@ -130,9 +137,6 @@ class VehicleEncounter:
             self.reason = "Unrealistically long/short"
             return
 
-        # Calculate mete data
-        self.calc_meta_info()
-
         # Ensure minimal speed criteria is met
         if self.mean_speed_m_s < MIN_SELF_SPEED_M_S:
             # print((False, False), self.encounter_begin, self.encounter_end)
@@ -141,8 +145,14 @@ class VehicleEncounter:
             return
 
         # Run YOLO5
-        self.yolo5 = detect_cars.CarDetector(self.image_list)
-        self.yolo5_results = self.yolo5.manage_detection()
+        yolo5 = detect_cars.CarDetector(self.image_list)
+        self.yolo5_results = yolo5.manage_detection()
+
+        # Check that result is not None
+        if self.yolo5_results is None:
+            self.results = (False, False)
+            self.reason = "No visual detections"
+            return
 
         # Filter out bounding boxes, that do not meet minimal size criterium
         self.yolo5_results_filtered = self.yolo5_results[
@@ -156,10 +166,15 @@ class VehicleEncounter:
             return
 
         # Run Raft
-        self.raft = detect_flow.FlowDetector(self.image_list, self.mean_side_distance_cm, self.mean_speed_m_s,
+        raft = detect_flow.FlowDetector(self.image_list, self.mean_side_distance_cm, self.mean_speed_m_s,
                                              standalone_mode=False, yolo_bounding_boxes=self.yolo5_results_filtered)
-        self.results = self.raft.get_flow_results()
-        self.reason = "Ran through tests"
+        self.results = raft.get_flow_results()
+
+        if self.results[0]:
+            # Get vehicle type most often vehicle type in top ten highest y values (lowest to bottom of frame)
+            self.reason = self.yolo5_results_filtered.sort_values('ymax')['name'].iloc[-10:].value_counts().index[0]
+        else:
+            self.reason = "Ran through tests"
 
 class DataAsPandas:
     def __init__(self, directory):
@@ -225,12 +240,20 @@ class DataAsPandas:
 
         # Do the trimming and return
         copy_of_self.trim_to_set_period()
-        return copy_of_self
+        return copy_of_self, (trim_begin, trim_end)
 
     def trim_to_set_period(self):
         # Iterate over timeseries for trimming
+        before_value = pd.to_datetime(self.overview['general_meta']['start_time_unix'],unit='s')
+        after_value = pd.to_datetime(self.overview['general_meta']['end_time_unix'],unit='s')
+
         for sensor in self.dataframes.keys():
-            self.dataframes[sensor].dataframe = self.dataframes[sensor].dataframe.truncate(before=pd.to_datetime(self.overview['general_meta']['start_time_unix'],unit='s'), after=pd.to_datetime(self.overview['general_meta']['end_time_unix'],unit='s'))
+            if sensor == "gnss_0":
+                before_value_gnss = pd.to_datetime(self.overview['general_meta']['start_time_unix'] - 2, unit='s')
+                after_value_gnss = pd.to_datetime(self.overview['general_meta']['end_time_unix'] + 2, unit='s')
+                self.dataframes[sensor].dataframe = self.dataframes[sensor].dataframe.truncate(before=before_value_gnss, after=after_value_gnss)
+            else:
+                self.dataframes[sensor].dataframe = self.dataframes[sensor].dataframe.truncate(before=before_value, after=after_value)
 
 def traverse_bag_vehicle_encounters(bagfile_directory, encounter_max_dist, bagfile_pandas):
     """To look for moments in the data where a vehicle encounter is propable, the side distance sensor is checked for being under a certain value"""
@@ -254,6 +277,10 @@ def traverse_bag_vehicle_encounters(bagfile_directory, encounter_max_dist, bagfi
     ind_rise_edge = np.where(diff_edges == 1)[0] + 1
     ind_fall_edge = np.where(diff_edges == -1)[0]
 
+    # Skip if no potential Regions
+    if len(ind_rise_edge) == 0 and len(ind_fall_edge) == 0:
+        return []
+
     # Check if indicees for rising and falling are equal:
     if len(ind_rise_edge) != len(ind_fall_edge):
         # TODO: Save the situation
@@ -275,45 +302,101 @@ def traverse_bag_vehicle_encounters(bagfile_directory, encounter_max_dist, bagfi
 
         # Check if sudden jump in range (Background, (but triggered) --> car --> background)
         tmp_range_values = side_dist.iloc[begin_index:end_index].range_cm.values
-        potential_jumps = (np.where(np.diff(tmp_range_values) >= MAX_SINGLE_ENCOUNTER_VARIATION_CM))[0]
+
+        # Clean out nan values
+        tmp_range_values_nonan = tmp_range_values[~np.isnan(tmp_range_values)]
+        potential_jumps = (np.where(np.abs(np.diff(tmp_range_values_nonan)) >= MAX_SINGLE_ENCOUNTER_VARIATION_CM))[0] + 1
+        non_nan_map = np.where(~np.isnan(tmp_range_values))[0]
+
         if len(potential_jumps) != 0:
-            warnings.warn(f"Unrealistic large jump between {begin_timestamp} and {end_timestamp}!")
+            # Create list of arrays with value indices each
+            non_nan_blocks = np.split(non_nan_map, potential_jumps)
 
-        # Get trimmed version of data as pandas
-        cropped_bagfile_pandas = bagfile_pandas.get_trimmed_copy((begin_timestamp, end_timestamp), 10)
+            for non_nan_block in non_nan_blocks:
+                # Get bounding indices from block
+                sub_begin_index = non_nan_block[0] + begin_index
+                sub_end_index = non_nan_block[-1] + begin_index
 
-        # Append event to list
-        vehicle_encounter_list.append(VehicleEncounter(bagfile_directory, (begin_timestamp, end_timestamp), cropped_bagfile_pandas))
+                # Get new timestamps for begin and end index
+                begin_timestamp = side_dist.iloc[[sub_begin_index]].index
+                end_timestamp = side_dist.iloc[[sub_end_index]].index
+
+                # Get back index before nan removal
+                #current_values = non_nan_map[sub_begin_index:sub_end_index+1]
+
+                # Get trimmed version of data as pandas
+                cropped_bagfile_pandas, extended_timestamps = bagfile_pandas.get_trimmed_copy((begin_timestamp, end_timestamp), 2)
+
+                # Append event to list
+                vehicle_encounter_list.append(VehicleEncounter(bagfile_directory, extended_timestamps, cropped_bagfile_pandas))
+
+        else:
+            # Get trimmed version of data as pandas
+            cropped_bagfile_pandas, extended_timestamps = bagfile_pandas.get_trimmed_copy((begin_timestamp, end_timestamp), 2)
+
+            # Append event to list
+            vehicle_encounter_list.append(VehicleEncounter(bagfile_directory, extended_timestamps, cropped_bagfile_pandas))
 
     # Return list of vehicle encounters
     return vehicle_encounter_list
 
 if __name__ == "__main__":
     # Get df of ingested tracks
-    bagfile_unpack_direcory = "../bagfiles_unpack"
+    bagfile_unpack_direcory = "H:/bagfiles_unpack"
     bagfile_db_file = "trajectory_db.feather"
     bagfile_db = pd.read_feather(os.path.join(bagfile_unpack_direcory, bagfile_db_file))
 
+    # Get df of processed encounters
+    encounter_db_file = "encounter_db_v2.feather"
+    if not os.path.isfile(os.path.join(bagfile_unpack_direcory, encounter_db_file)):
+        encounter_db = pd.DataFrame(columns=['is_encounter', 'direction', 'distance', 'begin', 'end', 'description', 'working_dir', 'bag_file', 'manual_override'])
+    else:
+        encounter_db = pd.read_feather(os.path.join(bagfile_unpack_direcory, encounter_db_file))
+
     # Filter out files, that are completely processed
-    bagfile_db = bagfile_db.loc[bagfile_db['processed'] == False]
+    #bagfile_db = bagfile_db.loc[bagfile_db['processed'] == False]
 
     # Set threshold for encounter indication in cm
-    encounter_max_dist = 300
+    encounter_max_dist = 350
+
+    # Create List to collect encounters
+    encounter_results_collector_list = []
 
     # TODO: Traverse Trajectories(s) for TOIs
     for count_bagfile, bagfile_db_entry in bagfile_db.iterrows():
+        if bagfile_db_entry['processed'] == True and bagfile_db_entry['name'] not in ['2022-08-08-05-51-45_0.bag']:
+            continue
+
         print(f"DEBUG: Checking bagfile {count_bagfile}")
         # Get bagfile path
         bagfile_path = os.path.join(bagfile_db_entry['directory'], bagfile_db_entry['name'][:-4])
 
         # Load into pandas for operations
-        bagfile_pandas = DataAsPandas(bagfile_path)
+        bagfile_pandas = DataAsPandas(os.path.join(bagfile_unpack_direcory, os.path.split(bagfile_path)[1]))
         bagfile_pandas.load_from_working_directory()
 
         # Go though trajectory for events with potential vehicle encounters
-        encounter_list = traverse_bag_vehicle_encounters(bagfile_path, encounter_max_dist, bagfile_pandas)
+        encounter_list = traverse_bag_vehicle_encounters(os.path.join(bagfile_unpack_direcory, os.path.split(bagfile_path)[1]), encounter_max_dist, bagfile_pandas)
 
         # Verify TOIs as real encounters
         for count_encounter, encounter in enumerate(encounter_list):
-            print(f"DEBUG: Checking encounter {count_encounter} in bafile number {count_bagfile}")
-            print(encounter.verify_encounter())
+            print(f"DEBUG: Checking encounter {count_encounter} in bafile number {count_bagfile} ({os.path.split(bagfile_path)[-1]})")
+            tmp_results = list(encounter.verify_encounter())
+            tmp_results.extend(os.path.split(bagfile_path))
+            tmp_results.append(bagfile_pandas.overview['weather']['hourly'])
+            tmp_results.append(False)
+            print(tmp_results[:8])
+            encounter_results_collector_list.append(tmp_results)
+
+        # Concat to existing db_file
+        tmp_encounter_db = pd.DataFrame(encounter_results_collector_list, columns=['is_encounter', 'direction', 'distance', 'bike_speed', 'bike_heading_rad', 'begin', 'end', 'description', 'working_dir', 'bag_file', 'weather', 'manual_override'])
+        encounter_db = pd.concat([encounter_db, tmp_encounter_db])
+
+        # Set bagfile db to processed
+        bagfile_db.at[count_bagfile, 'processed'] = True
+
+        # Save changes on bagfile_db
+        bagfile_db.to_feather(os.path.join(bagfile_unpack_direcory, bagfile_db_file))
+
+        # Save changes to encounter_db
+        encounter_db.reset_index(drop=True).to_feather(os.path.join(bagfile_unpack_direcory, encounter_db_file))
